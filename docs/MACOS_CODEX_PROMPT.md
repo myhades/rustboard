@@ -1,6 +1,6 @@
 # 交给 Mac Codex 的开发任务
 
-在现有 Rustboard 主仓库中完成 macOS 原生集成。先阅读 README.md、ARCHITECTURE.md、PROTOCOL.md、SECURITY.md、docs/MACOS_HANDOFF.md、CONTINUE.md 和 tests/protocol/vectors.json。另一台 Windows 的主维护者已实现 Core、TLS1.3双向指纹认证、CLI、Windows OLE，并完成真实 Explorer 本地/经TLS的4KiB、64MiB、1GiB多文件粘贴及哈希验证；不要把这些结果当作 macOS 已通过。
+在现有 Rustboard 主仓库中完成 macOS 原生集成。先阅读 ARCHITECTURE.md、PROTOCOL.md、SECURITY.md、docs/MACOS_HANDOFF.md、CONTINUE.md 和 tests/protocol/vectors.json。另一台 Windows 的主维护者已实现 Core、TLS1.3双向指纹认证、CLI、Windows OLE，并完成真实 Explorer 本地/经TLS的4KiB、64MiB、1GiB多文件粘贴及哈希验证；不要把这些结果当作 macOS 已通过。
 
 你的机器上原有 `Misc/lazy_paste` POC；先检查可访问性和约定，不要假设 Windows 能读它。复用已验证的 NSFileProviderReplicatedExtension、隐藏 domain、dataless metadata、Finder Cmd+V、fetchContents、APFS clone、Rust本地IPC和launchd机制，但以本仓库协议为唯一契约。
 

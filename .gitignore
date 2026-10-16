@@ -1,3 +1,24 @@
-/target/
+# Rust build output (keep Cargo.lock for reproducible application builds)
+**/target/
+**/*.rs.bk
 /test-output/
 *.log
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Editor and operating-system metadata
+.idea/
+.vs/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Native macOS build output and per-user Xcode state
+/native/macos/build/
+**/DerivedData/
+**/xcuserdata/

@@ -1,0 +1,11 @@
+{
+  "Test": "Explorer CF_HDROP manifest through TLS",
+  "Kind": "files",
+  "Count": 3,
+  "Sizes": [
+    4096,
+    67108864,
+    1073741824
+  ],
+  "HasAbsolutePath": false
+}

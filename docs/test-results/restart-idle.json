@@ -1,0 +1,8 @@
+{
+  "Test": "Agent restart, identity, hidden window, idle",
+  "IdentityPersistent": true,
+  "MainWindowHandleZero": true,
+  "IdleCpuSecondsOver3Seconds": 0.0,
+  "IdleWorkingSet": null,
+  "RestartStatusOK": true
+}

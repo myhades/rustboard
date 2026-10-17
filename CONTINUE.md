@@ -187,3 +187,37 @@
 - PASS：最终本地签名包生成，package-final.txt；产物SHA256及签名请求release-build.json。先前install/Homebrew lifecycle证据仍有效但记录为先前构建；没有发布包或远程push。
 - 清理完成：acceptance测试配对为空、合成peer停止、临时org.rustboard.acceptance已bootout、hidden acceptance domain已移除。无生产launchd安装；测试数据与证据保留。用户前台sign-session可Ctrl-C结束，未修改私钥ACL。
 - BLOCKED：Windows真实双向，用户尚未启动对端。NOT_TESTED：整机登录/重启、第二账户拒绝、原生同Offer版本变更、跨版本brew升级、公证分发。已记录SSH别名alarics-macbook-air供主维护者联调。其他详细PASS/FAIL证据见docs/MACOS_RESULTS.md。
+
+## Windows 主仓库接手与性能基线 — 2026-10-17（状态优先）
+
+- 已从 Mac SSH fetch 并快进合入 c1c29d2、10736fa；没有 GitHub push。Mac 工作区与已签名应用未修改。
+- PASS：Windows fmt、Clippy、11项 workspace 测试、Release 构建、Python 原始向量。不是新增 Explorer/Finder 或真实双机验收。
+- Mac release 单次64MiB测量：Core TLS 56.83MiB/s；Node.local_ipc及JSON序列化42.22MiB/s；独立生产Swift解码器7.97MiB/s。解码开销明显，但完整fetch的2.67MiB/s仍未完全解释。
+- 新增可复现分层探针与原始记录，详见 docs/PERFORMANCE_BASELINE.md。没有生产性能修复或协议变更；APFS clone延迟、Unix IPC完整链路及原生交付还需单独测量。
+- 整体仍为性能FAIL、实体双向互通未验收。根目录README按用户原有“无需README”要求移除，缺失不是验收失败。
+
+## 性能修复实现与两端诊断 — 2026-10-17
+
+- 已修复共享Rust Data枚举解析的逐字节中间值开销，以及Swift生产IPC的逐字节通用JSON解码开销；不改v1编码/向量、安全认证和按需读取语义。
+- Windows Core TLS 64MiB约21.17→47.27MiB/s；真实IDataObject/IStream落盘1GiB19.26秒、53.16MiB/s，零发布读取及独立哈希通过。不是Explorer复测。
+- Mac隔离TLS→Unix→Swift→落盘64MiB9.55→1.55秒（两次均使用修复后的Rust，仅切换Swift解码器）；1GiB25.39秒、40.33MiB/s，独立哈希通过。不是签名IPC或File Provider/Finder验收。
+- Windows12项、Mac11项Rust测试及各自检查通过；Swift兼容/故障清理/新解码器测试通过；Mac完整修复版已独立构建。
+- APFS clone原语独立测量：1GiB约0.149ms/0.088ms，两份clone在源改写后哈希不变。不是File Provider交付延迟。
+- 用户选择本地签名。首次通知对应旧目录签名，修复版目录仍待签名；未启动原生测试Agent/domain。详见 docs/PERFORMANCE_FIX.md，后续签名/原生验收记录应追加覆盖此状态。
+
+## 修复版真实Finder验收与后续候选 — 2026-10-17（覆盖前文签名阻塞）
+
+- 用户自行解锁并签署 performance-probe/repo 中的修复版；严格签名校验通过。发现系统起初选中旧扩展，已在读取主体前停止并切换注册，核对实际运行路径后复测。
+- PASS：真实File Provider程序读取三文件及哈希。64MiB fetch5.498秒，1GiB88.618秒；这不是Finder操作。
+- PASS：重新发布未读取Offer，用户真实Finder Cmd+V，三文件独立哈希通过，最终源读取恰好等于文件大小。64MiB fetch3.593秒、1GiB58.055秒；旧基线23.942/383.093秒。没有把OS缓存命中算首次传输。
+- Finder样本内Agent RSS峰值41910272 bytes、Provider29540352 bytes；采样从用户操作之后开始，不宣称完整连续峰值。原始记录 docs/test-results/performance/native-fixed。
+- 清理：测试Agent/peer退出、配对撤销、测试domain移除、原扩展注册恢复，45441/45442已无监听。未创建持久登录项。
+- 额外优化候选：原生采样定位Agent逐字节Value构造/序列化开销，新增typed IPC响应，输出逐字节等价。当前Windows工作区包含此候选；Windows13项/Mac12项Rust测试和各自检查通过。诊断64MiB1.548→1.259秒。
+- 候选独立构建在 performance-probe/typed-repo/target/macos，尚未开发者签名/真实Finder复测。上面的Finder数据对应保留的 performance-probe/repo 已签名版本，不混用。详见 docs/PERFORMANCE_FIX.md。无commit或push。
+
+## 本轮收尾与专项性能目标 — 2026-10-17（最新状态）
+
+- 用户要求先收尾，后续另做专项性能优化。本轮停止追加性能实现，保留已验证修复与 typed IPC 候选，验收边界不变。
+- 用户报告 Windows→Mac iperf 约400 Mbps；目标为真实文件交付接近同环境测速上限、本地同盘交付额外耗时可忽略，并以低CPU/低内存扩展到10G级链路。当前尚未证明这些目标。
+- 专项范围、分层责任、单位换算、资源指标与验收顺序见 docs/PERFORMANCE_TARGETS.md；最新修复及证据汇总见 docs/PERFORMANCE_FIX.md。
+- 不再触发签名/部署/原生测试；保留Mac主工作区、两个隔离构建和测试证据。不推送GitHub。

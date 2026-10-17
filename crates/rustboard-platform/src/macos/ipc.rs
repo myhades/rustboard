@@ -1,7 +1,7 @@
 use anyhow::{Result, ensure};
 use rustboard_core::{
     IpcOperation, IpcRequest, read_frame,
-    transport::{Node, Peer, device_from_pin},
+    transport::{IpcReply, Node, Peer, device_from_pin},
     write_frame,
 };
 use std::{
@@ -148,13 +148,13 @@ impl Server {
                         authenticate(&stream, false)?;
                         while !node.stop.load(Ordering::Acquire) {
                             let req: IpcRequest = read_frame(&mut stream)?;
-                            let reply = (|| -> Result<serde_json::Value> {
+                            let reply = (|| -> Result<IpcReply> {
                                 ensure!(req.protocol == 1, "unsupported protocol");
                                 match req.request {
-                                    IpcOperation::Control { args } => server.handle(&node, args),
-                                    op => node.local_ipc(op),
+                                    IpcOperation::Control { args } => server.handle(&node, args).map(IpcReply::Other),
+                                    op => node.local_ipc_reply(op),
                                 }
-                            })().unwrap_or_else(|_| serde_json::json!({"ok":false,"protocol":1,"code":"io","error":"request failed"}));
+                            })().unwrap_or_else(|_| IpcReply::Other(serde_json::json!({"ok":false,"protocol":1,"code":"io","error":"request failed"})));
                             write_frame(&mut stream, &reply)?;
                         }
                         Ok(())

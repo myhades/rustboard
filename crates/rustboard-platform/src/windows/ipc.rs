@@ -1,7 +1,7 @@
 use anyhow::{Result, ensure};
 use rustboard_core::{
     read_frame,
-    transport::{Node, Peer, device_from_pin},
+    transport::{IpcReply, Node, Peer, device_from_pin},
     write_frame,
 };
 use std::{
@@ -252,12 +252,14 @@ impl Server {
                 read_frame::<_, rustboard_core::IpcRequest>(&mut self.pipe).and_then(|request| {
                     ensure!(request.protocol == 1, "unsupported IPC version");
                     match request.request {
-                        rustboard_core::IpcOperation::Control { args } => self.handle(&node, args),
-                        operation => node.local_ipc(operation),
+                        rustboard_core::IpcOperation::Control { args } => {
+                            self.handle(&node, args).map(IpcReply::Other)
+                        }
+                        operation => node.local_ipc_reply(operation),
                     }
                 });
             let value = reply
-                .unwrap_or_else(|error| serde_json::json!({"ok":false,"protocol":1,"code":"io","error":error.to_string()}));
+                .unwrap_or_else(|error| IpcReply::Other(serde_json::json!({"ok":false,"protocol":1,"code":"io","error":error.to_string()})));
             let _ = write_frame(&mut self.pipe, &value);
             // Wait for client to consume response before disconnecting (no blocking FlushFileBuffers).
             let mut dummy = [0u8; 1];

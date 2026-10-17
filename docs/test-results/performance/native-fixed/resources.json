@@ -1,0 +1,20 @@
+{
+  "interval_seconds": 0.5,
+  "sample_count": 186,
+  "peaks": {
+    "agent": {
+      "max_rss_bytes": 39616512,
+      "max_sampled_cpu_percent": 64.9,
+      "paths": [
+        "/Users/myhades/Documents/GitHub/rustboard/test-output/performance-probe/repo/target/macos/bin/rustboardd"
+      ]
+    },
+    "provider": {
+      "max_rss_bytes": 28868608,
+      "max_sampled_cpu_percent": 29.3,
+      "paths": [
+        "/Users/myhades/Documents/GitHub/rustboard/test-output/performance-probe/repo/target/macos/Rustboard.app/Contents/PlugIns/RustboardProvider.appex/Contents/MacOS/RustboardProvider"
+      ]
+    }
+  }
+}

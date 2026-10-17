@@ -215,6 +215,30 @@ pub fn connect(identity: &Identity, peer: &Peer) -> Result<Client> {
 type IpcSourceKey = (String, String, String, String);
 type SharedConnection = Arc<Mutex<Option<Client>>>;
 
+/// Wire-equivalent IPC reply without a serde_json::Value allocation per data byte.
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum IpcReply {
+    Data {
+        ok: bool,
+        protocol: u16,
+        response: IpcData,
+    },
+    Other(serde_json::Value),
+}
+
+// Keep the same sorted field order as the original Value serializer, including
+// the bytes-first response consumed by the Swift fast path.
+#[derive(Serialize)]
+pub struct IpcData {
+    bytes: Vec<u8>,
+    eof: bool,
+    offset: u64,
+    request_id: u64,
+    #[serde(rename = "type")]
+    kind: &'static str,
+}
+
 pub struct Node {
     pub identity: Identity,
     pub engine: Mutex<Engine>,
@@ -229,12 +253,18 @@ pub struct Node {
 impl Node {
     /// Portable File Provider/FUSE IPC operations; OS adapter authenticates the local caller.
     pub fn local_ipc(self: &Arc<Self>, operation: IpcOperation) -> Result<serde_json::Value> {
+        Ok(serde_json::to_value(self.local_ipc_reply(operation)?)?)
+    }
+    /// Native transports serialize this reply directly; validation is shared with local_ipc.
+    pub fn local_ipc_reply(self: &Arc<Self>, operation: IpcOperation) -> Result<IpcReply> {
         match operation {
             IpcOperation::GetOffer => {
                 let mut engine = self.engine.lock().unwrap();
                 engine.expire();
                 ensure!(!engine.paused, "paused");
-                Ok(serde_json::json!({"ok":true,"protocol":1,"offer":engine.current}))
+                Ok(IpcReply::Other(
+                    serde_json::json!({"ok":true,"protocol":1,"offer":engine.current}),
+                ))
             }
             IpcOperation::Read {
                 request_id,
@@ -313,13 +343,23 @@ impl Node {
                         key.1 != offer_id || key.2 != file_id || key.3 != version
                     });
                 }
-                Ok(
-                    serde_json::json!({"ok":true,"protocol":1,"response":Message::Data{request_id,offset,eof:offset+n as u64==source.len(),bytes}}),
-                )
+                Ok(IpcReply::Data {
+                    ok: true,
+                    protocol: 1,
+                    response: IpcData {
+                        bytes,
+                        eof: offset + n as u64 == source.len(),
+                        offset,
+                        request_id,
+                        kind: "data",
+                    },
+                })
             }
             IpcOperation::Cancel { request_id } => {
                 self.ipc_connections.lock().unwrap().clear();
-                Ok(serde_json::json!({"ok":true,"protocol":1,"request_id":request_id}))
+                Ok(IpcReply::Other(
+                    serde_json::json!({"ok":true,"protocol":1,"request_id":request_id}),
+                ))
             }
             IpcOperation::Control { .. } => {
                 anyhow::bail!("control operation belongs to native adapter")
@@ -618,12 +658,16 @@ impl ReadAt for RemoteSource {
                     length: buffer.len() as u32,
                 },
             )?;
-            match read_frame(stream)? {
-                Message::Data {
+            // A read can only succeed with Data. Decode directly into the typed
+            // payload, avoiding serde's internally-tagged enum Content buffer
+            // (one intermediate value per byte of the JSON array).
+            match read_frame::<_, DataReply>(stream)? {
+                DataReply {
                     request_id: 1,
                     offset: returned,
                     bytes,
                     eof,
+                    ..
                 } if returned == offset
                     && bytes.len() <= buffer.len()
                     && offset + bytes.len() as u64 <= self.len() =>
@@ -646,9 +690,74 @@ impl ReadAt for RemoteSource {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DataReply {
+    #[serde(rename = "type")]
+    _kind: DataReplyKind,
+    request_id: u64,
+    offset: u64,
+    bytes: Vec<u8>,
+    eof: bool,
+}
+
+#[derive(Deserialize)]
+enum DataReplyKind {
+    #[serde(rename = "data")]
+    Data,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn typed_ipc_reply_is_byte_identical_to_original_value() {
+        for bytes in [vec![], (0..=255).collect(), vec![251; MAX_CHUNK]] {
+            for eof in [false, true] {
+                let old = serde_json::json!({"ok":true,"protocol":1,"response":Message::Data {
+                    request_id: u64::MAX, offset: 9007199254740993, bytes: bytes.clone(), eof,
+                }});
+                let new = IpcReply::Data {
+                    ok: true,
+                    protocol: 1,
+                    response: IpcData {
+                        bytes: bytes.clone(),
+                        eof,
+                        offset: 9007199254740993,
+                        request_id: u64::MAX,
+                        kind: "data",
+                    },
+                };
+                assert_eq!(
+                    serde_json::to_vec(&old).unwrap(),
+                    serde_json::to_vec(&new).unwrap()
+                );
+            }
+        }
+    }
+    #[test]
+    fn direct_data_decoder_preserves_wire_validation() {
+        let value = Message::Data {
+            request_id: u64::MAX,
+            offset: 9007199254740993,
+            bytes: vec![0, 250, 255],
+            eof: true,
+        };
+        let encoded = serde_json::to_vec(&value).unwrap();
+        let reply: DataReply = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(reply.request_id, u64::MAX);
+        assert_eq!(reply.offset, 9007199254740993);
+        assert_eq!(reply.bytes, [0, 250, 255]);
+        for invalid in [
+            r#"{"type":"error","request_id":1,"offset":0,"bytes":[],"eof":true}"#,
+            r#"{"type":"data","request_id":1,"offset":0,"bytes":[256],"eof":true}"#,
+            r#"{"type":"data","request_id":1,"offset":0,"bytes":[-1],"eof":true}"#,
+            r#"{"type":"data","request_id":1,"offset":0,"bytes":[1.0],"eof":true}"#,
+            r#"{"type":"data","request_id":1,"offset":0,"bytes":[],"eof":true,"extra":0}"#,
+        ] {
+            assert!(serde_json::from_str::<DataReply>(invalid).is_err());
+        }
+    }
     #[test]
     fn mutual_tls_offer_lazy_read_and_untrusted_rejection() {
         let a = Node::new(Identity::generate().unwrap(), vec![]);

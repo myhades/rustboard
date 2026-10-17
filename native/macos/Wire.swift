@@ -49,6 +49,64 @@ func itemID(_ offer: Offer, _ file: FileEntry) -> String {
 }
 struct DataMessage: Decodable { let type: String; let request_id: UInt64; let offset: UInt64; let bytes: [UInt8]; let eof: Bool }
 struct Reply: Decodable { let ok: Bool; let `protocol`: UInt16; let offer: Offer?; let response: DataMessage? }
+// Fast path for the exact JSON emitted by Node.local_ipc's sorted Value map.
+// Other valid v1 layouts (field order, whitespace, escapes) use JSONDecoder.
+// This is an implementation optimization, not a new encoding or a weaker parser.
+func decodeReply(_ packet: Data) throws -> Reply {
+    guard !packet.isEmpty, packet.count <= frameLimit else {throw WireError.invalid}
+    let fast: Reply? = try packet.withUnsafeBytes { raw -> Reply? in
+        let input = raw.bindMemory(to: UInt8.self)
+        var i = 0
+        func whitespace() {
+            while i < input.count, input[i] == 32 || input[i] == 9 || input[i] == 10 || input[i] == 13 {i += 1}
+        }
+        func take(_ literal: StaticString) -> Bool {
+            literal.withUTF8Buffer { expected in
+                guard expected.count <= input.count - i else {return false}
+                for c in expected {guard input[i] == c else {return false}; i += 1}
+                return true
+            }
+        }
+        func number() -> UInt64? {
+            guard i < input.count, input[i] >= 48, input[i] <= 57 else {return nil}
+            let first = i
+            var value: UInt64 = 0
+            while i < input.count, input[i] >= 48, input[i] <= 57 {
+                let digit = UInt64(input[i] - 48)
+                guard value <= (UInt64.max - digit) / 10 else {return nil}
+                value = value * 10 + digit; i += 1
+            }
+            guard i - first == 1 || input[first] != 48 else {return nil}
+            return value
+        }
+        guard take("{\"ok\":true,\"protocol\":1,\"response\":{\"bytes\":[") else {return nil}
+        var bytes = [UInt8](); bytes.reserveCapacity(65536)
+        whitespace()
+        if i < input.count, input[i] != 93 {
+            while true {
+                whitespace()
+                guard bytes.count < 65536, let n = number(), n <= 255 else {throw WireError.invalid}
+                bytes.append(UInt8(n))
+                whitespace()
+                guard i < input.count else {throw WireError.invalid}
+                if input[i] != 44 {break}
+                i += 1
+            }
+        }
+        guard i < input.count, input[i] == 93 else {throw WireError.invalid}
+        guard take("],\"eof\":") else {return nil}
+        let eof: Bool
+        if i < input.count, input[i] == 116 {guard take("true") else {return nil}; eof = true}
+        else {guard take("false") else {return nil}; eof = false}
+        guard take(",\"offset\":"), let offset = number(),
+              take(",\"request_id\":"), let requestID = number(),
+              take(",\"type\":\"data\"}}"), i == input.count else {return nil}
+        return Reply(ok: true, protocol: 1, offer: nil,
+            response: DataMessage(type: "data", request_id: requestID, offset: offset, bytes: bytes, eof: eof))
+    }
+    if let fast {return fast}
+    return try JSONDecoder().decode(Reply.self, from: packet)
+}
 struct Operation: Encodable {
     let type: String
     var request_id: UInt64? = nil
@@ -112,7 +170,7 @@ final class IPCSession {
             while offset < count {let n = read(fd, raw.baseAddress!.advanced(by: offset), count-offset); guard n > 0 else {throw WireError.unavailable}; offset += n}
         }; return result
     }
-    let reply = try JSONDecoder().decode(Reply.self, from: readExact(frameLength(readExact(4))))
+    let reply = try decodeReply(readExact(frameLength(readExact(4))))
     guard reply.ok, reply.protocol == 1 else {throw WireError.unavailable}; return reply
     }
 }

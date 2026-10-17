@@ -1,0 +1,19 @@
+{
+  "artifacts": [
+    {
+      "name": "rustboard-0.1.0-prototype-macos.tar.gz",
+      "bytes": 1759753,
+      "sha256": "9727426d336484dc3dd7d5b91c885fe177c495de2ab8481eb7977a04e54e359e",
+      "contents_checked_no_profiles": true
+    },
+    {
+      "name": "rustboard-0.1.0-prototype-windows-x64.zip",
+      "bytes": 1566418,
+      "sha256": "5ed27c147c45cb6bfcf92c072b628be0503c26f3fe4e7756a595604e8ca1e177",
+      "contents_checked_no_profiles": true
+    }
+  ],
+  "installation": "Windows package layout upgraded under Windows PowerShell 5.1; Mac extracted tar installed successfully; both retained device identity and one peer.",
+  "scope": "local signed prototype; not notarized or published",
+  "source_commit_note": "Final source commit also contains this manifest; only acceptance documentation changed after packaged installation tests."
+}

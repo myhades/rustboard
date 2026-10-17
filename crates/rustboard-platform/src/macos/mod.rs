@@ -17,6 +17,7 @@ unsafe extern "C" {
     fn rb_clear_owned();
     fn rb_pump();
     fn rb_capture() -> *mut libc::c_char;
+    fn rb_capture_image_file(stem: *const libc::c_char) -> i32;
     fn rb_publish(json: *const libc::c_char) -> i32;
 }
 pub struct MacBackend {
@@ -130,6 +131,9 @@ pub fn run() -> Result<()> {
     }
     let dir = ipc::data_dir()?;
     let server = ipc::Server::bind(dir.clone())?;
+    let images = dir.join("images");
+    ipc::protect_dir(&images)?;
+    crate::image_file::prepare(&images)?;
     let snapshots = dir.join("snapshots");
     ipc::protect_dir(&snapshots)?;
     // A singleton owns this private directory. No offer survives an Agent restart.
@@ -149,13 +153,19 @@ pub fn run() -> Result<()> {
         .lock()
         .unwrap()
         .persist_clock(dir.join("clock.json"))?;
+    let configured = crate::config::apply(&dir, &mut node.engine.lock().unwrap())?;
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if !args.is_empty() {
+    let listen = if !args.is_empty() {
         ensure!(
             args.len() == 2 && args[0] == "--listen",
             "usage: rustboardd [--listen IP:port]"
         );
-        node.serve(std::net::TcpListener::bind(&args[1])?)?;
+        Some(args[1].parse::<std::net::SocketAddr>()?)
+    } else {
+        configured
+    };
+    if let Some(address) = listen {
+        node.serve(std::net::TcpListener::bind(address)?)?;
     }
     server.spawn(node.clone());
     node.start_sync();
@@ -181,6 +191,20 @@ pub fn run() -> Result<()> {
                     },
                     Default::default(),
                 ),
+                Some("image") => {
+                    if engine.paused || engine.text_only {
+                        engine.withdraw();
+                        continue;
+                    }
+                    let stem =
+                        images.join(format!("clipboard-{}", rustboard_core::engine::new_id()));
+                    let cpath = CString::new(stem.as_os_str().as_encoded_bytes())?;
+                    match unsafe { rb_capture_image_file(cpath.as_ptr()) } {
+                        1 => crate::image_file::offer(&mut engine, stem.with_extension("png")),
+                        2 => crate::image_file::offer(&mut engine, stem.with_extension("tiff")),
+                        _ => Err(anyhow::anyhow!("image file capture failed")),
+                    }
+                }
                 Some("files") => {
                     let paths: Vec<PathBuf> = serde_json::from_value(value["paths"].clone())?;
                     local_files::offer(&mut engine, paths, &snapshots)
@@ -194,7 +218,11 @@ pub fn run() -> Result<()> {
                 engine.withdraw();
                 eprintln!("clipboard capture rejected");
             } else {
-                eprintln!("local offer published content_bytes_read=0");
+                if value["kind"] == "image" {
+                    eprintln!("clipboard image published as ordinary file");
+                } else {
+                    eprintln!("local offer published content_bytes_read=0");
+                }
             }
         }
         node.engine.lock().unwrap().expire();

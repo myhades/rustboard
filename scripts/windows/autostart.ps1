@@ -14,7 +14,7 @@ $Agent=(Resolve-Path -LiteralPath $Agent).Path
 if ($Agent.Contains('"')) { throw 'Invalid executable path' }
 $command='"'+$Agent+'"'
 if ($Listen) {
-    $endpoint=[System.Net.IPEndPoint]::Parse($Listen)
+    $endpoint=[System.Net.IPEndPoint]::new([System.Net.IPAddress]::Parse($Listen.Substring(0,$Listen.LastIndexOf(':')).Trim('[',']')), [int]$Listen.Substring($Listen.LastIndexOf(':')+1))
     $command+=' --listen '+$endpoint.ToString()
 }
 New-Item -Path $key -Force | Out-Null

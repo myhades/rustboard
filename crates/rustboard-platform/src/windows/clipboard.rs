@@ -29,6 +29,7 @@ struct State {
     pending: bool,
     sources: Vec<Arc<rustboard_core::PatternSource>>,
     output: Option<PathBuf>,
+    images: PathBuf,
     started: Option<Instant>,
 }
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
@@ -100,6 +101,7 @@ pub fn set_text(window: HWND, text: &str) -> anyhow::Result<()> {
 pub enum Captured {
     Text(String),
     Files(Vec<PathBuf>),
+    Image(super::image_file::Image),
     Unsupported,
 }
 pub fn capture(window: HWND) -> anyhow::Result<Captured> {
@@ -137,6 +139,14 @@ pub fn capture(window: HWND) -> anyhow::Result<Captured> {
                 )?));
             }
             return Ok(Captured::Files(paths));
+        }
+        match super::image_file::capture() {
+            Ok(Some(image)) => return Ok(Captured::Image(image)),
+            Err(_) => {
+                eprintln!("clipboard image rejected: unsupported or larger than 64 MiB");
+                return Ok(Captured::Unsupported);
+            }
+            Ok(None) => {}
         }
         if IsClipboardFormatAvailable(13).is_ok() {
             let handle = HGLOBAL(GetClipboardData(13)?.0);
@@ -216,6 +226,26 @@ fn update(window: HWND) {
                         sizes.len()
                     );
                 }
+                Captured::Image(image) => {
+                    STATE.with_borrow(|s| {
+                        if let Some(node) = &s.node {
+                            let mut engine = node.engine.lock().unwrap();
+                            if engine.paused || engine.text_only {
+                                engine.withdraw();
+                                return;
+                            }
+                            let result = image
+                                .save(&s.images)
+                                .and_then(|path| crate::image_file::offer(&mut engine, path));
+                            if result.is_err() {
+                                engine.withdraw();
+                                eprintln!("clipboard image-to-file rejected");
+                            } else {
+                                eprintln!("clipboard image published as ordinary file");
+                            }
+                        }
+                    });
+                }
                 Captured::Unsupported => {
                     STATE.with_borrow(|s| {
                         if let Some(node) = &s.node {
@@ -290,6 +320,9 @@ pub fn run() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let dir = super::ipc::prepare_dir()?;
     let ipc = super::ipc::Server::bind(dir.clone())?;
+    let images = dir.join("images");
+    crate::image_file::prepare(&images)?;
+    STATE.with_borrow_mut(|s| s.images = images);
     let identity = rustboard_core::transport::Identity::load(&dir)?;
     let peers_path = dir.join("peers.json");
     let peers: Vec<rustboard_core::transport::Peer> = if peers_path.exists() {
@@ -306,14 +339,20 @@ pub fn run() -> anyhow::Result<()> {
         .lock()
         .unwrap()
         .persist_clock(dir.join("clock.json"))?;
-    if let Some(i) = args.iter().position(|v| v == "--listen") {
-        let address: std::net::SocketAddr = args
-            .get(i + 1)
-            .ok_or_else(|| anyhow::anyhow!("missing --listen IP:port"))?
-            .parse()?;
+    let configured = crate::config::apply(&dir, &mut node.engine.lock().unwrap())?;
+    let listen = if let Some(i) = args.iter().position(|v| v == "--listen") {
+        Some(
+            args.get(i + 1)
+                .ok_or_else(|| anyhow::anyhow!("missing --listen IP:port"))?
+                .parse::<std::net::SocketAddr>()?,
+        )
+    } else {
+        configured
+    };
+    if let Some(address) = listen {
         node.serve(std::net::TcpListener::bind(address)?)?;
-        node.start_sync();
     }
+    node.start_sync();
     ipc.spawn(node.clone());
     STATE.with_borrow_mut(|s| s.node = Some(node.clone()));
     unsafe {

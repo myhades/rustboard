@@ -221,7 +221,10 @@ impl Server {
                 ensure!(pin != node.identity.pin(), "cannot pair self");
                 let address = args[1].parse()?;
                 let mut peers = node.peers.lock().unwrap();
-                ensure!(peers.len() < 16, "peer limit reached");
+                ensure!(
+                    peers.len() < 16 || peers.iter().any(|p| p.fingerprint == pin),
+                    "peer limit reached"
+                );
                 let mut next = peers.clone();
                 next.retain(|p| p.fingerprint != pin);
                 next.push(Peer {
@@ -241,6 +244,9 @@ impl Server {
             }
             "stop" => node.stop.store(true, Ordering::Release),
             _ => anyhow::bail!("unknown command"),
+        }
+        if ["pause", "resume", "mode"].contains(&args[0].as_str()) {
+            crate::config::save_state(&self.dir, &node.engine.lock().unwrap())?;
         }
         Ok(serde_json::json!({"ok":true}))
     }

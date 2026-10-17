@@ -1,0 +1,43 @@
+[
+  {
+    "name": "clipboard-cf55876f-ac00-465f-b018-5c1c7a27bf96.png",
+    "bytes": 1365,
+    "sha256": "1279f986b08e9c1bba06dbd133a9360414a17408b25e57369eef10dff37fb096"
+  },
+  {
+    "name": "clipboard-ff662f64-4239-43fe-8ec0-7176e85b6941.tiff",
+    "bytes": 265526,
+    "sha256": "4d5ceb8c086bba49d92fa0eec8f71d5fa86ffe9141b6575277a5ef609264b059"
+  },
+  {
+    "name": "clipboard-68ab95d0-f81f-42f6-8aec-83005b3b0a1f.bmp",
+    "bytes": 154,
+    "sha256": "15e1e5b4aaf58cbeb57383c821f88cb0211801459d83cb1489f03766eeb3784d"
+  },
+  {
+    "name": "clipboard-e9250bc8-6d1e-4dd4-95ff-40a333978a87.bmp",
+    "bytes": 262282,
+    "sha256": "ba6bdaa2280874feb4697f8fcd01f72344dcc58e35bb3cc775672e1eeb0b28a4"
+  },
+  {
+    "name": "decoded.png",
+    "bytes": 170,
+    "sha256": "878716e1b6c3bb9d62b965f25bca6a6eb9ef8d1be30f339751bfd9a5d6a85222"
+  },
+  {
+    "name": "synthetic.bmp",
+    "bytes": 262198,
+    "sha256": "d1f6872508d9dba6d3c67954f5148a7b6416ada0e7724655340b9a5f31fdbf6e"
+  },
+  {
+    "name": "synthetic.png",
+    "bytes": 1365,
+    "sha256": "1279f986b08e9c1bba06dbd133a9360414a17408b25e57369eef10dff37fb096"
+  },
+  {
+    "name": "synthetic.png",
+    "bytes": 1365,
+    "sha256": "1279f986b08e9c1bba06dbd133a9360414a17408b25e57369eef10dff37fb096",
+    "test": "Finder copy -> Explorer paste; then Explorer copy -> Mac File Provider read, matching bytes"
+  }
+]

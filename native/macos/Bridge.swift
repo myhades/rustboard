@@ -20,6 +20,8 @@ private var owned = -1
     // Read file URL metadata only, never promise/file contents.
     if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
         if urls.count <= 256 { value = ["kind": "files", "paths": urls.map(\.path)] }
+    } else if board.types?.contains(.png) == true || board.types?.contains(.tiff) == true {
+        value = ["kind": "image"]
     } else if let text = board.string(forType: .string), text.utf8.count <= 262144, !text.contains("\0") {
         value = ["kind": "text", "text": text]
     }
@@ -62,4 +64,22 @@ private var owned = -1
         return -1
     }
     return rbAdoptOwned(sequence)
+}
+
+// Preserve encoded clipboard images as ordinary files, without decoding pixels.
+// Called on the same AppKit thread immediately after rb_capture returned image.
+@_cdecl("rb_capture_image_file") public func rbCaptureImageFile(_ stem: UnsafePointer<CChar>) -> Int32 {
+    let board = NSPasteboard.general
+    guard board.changeCount == observed else {return -1}
+    for (type, ext, code) in [(NSPasteboard.PasteboardType.png, "png", Int32(1)), (.tiff, "tiff", Int32(2))] {
+        guard board.types?.contains(type) == true else {continue}
+        guard let data = board.data(forType: type), !data.isEmpty, data.count <= 64 * 1024 * 1024 else {return -1}
+        let url = URL(fileURLWithPath: String(cString: stem) + "." + ext)
+        do {
+            try data.write(to: url, options: .withoutOverwriting)
+            guard board.changeCount == observed else {try? FileManager.default.removeItem(at: url); return -1}
+            return code
+        } catch {return -1}
+    }
+    return -1
 }

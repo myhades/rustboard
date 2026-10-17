@@ -1,5 +1,14 @@
 # Rustboard 续开发记录 — 2026-10-17
 
+## 0.1.0 prototype 部署（最新，覆盖以下历史运行状态）
+
+已按用户选择安装两边当前用户版本并配置登录启动，保留正式 default 配对。Windows 在 LocalAppData/Rustboard/bin；Mac 在 ~/Applications/Rustboard.app 和 ~/Library/Application Support/Rustboard/bin，由 launchd 运行。不要按历史测试清理步骤停止/撤销这套日常安装。
+
+图片文件和原生图片剪贴板统一作为普通文件传输；不增加原生图片协议、目录递归或编解码依赖。使用/限制见 docs/PROTOTYPE_0_1_0.md；当前安装验收见 docs/PROTOTYPE_RESULTS.md。后台双向文本、PNG/BMP/TIFF、真实 Finder/Explorer 粘贴以及服务重启配置持久化已测；整机重启未测。旧性能数据保留，不作为本轮的新测速。
+
+Mac 构建及签名在 test-output/prototype-0.1.0/repo；用户自行签名，禁止代理调用个人私钥。Mac 主工作区未覆盖。本轮仅本地准备和提交，不自动推送/公开发布。当前默认配置为 mode=all、paused=false，固定局域网监听地址；DHCP 地址改变需更新配置和配对地址。
+
+
 ## 专项性能最新状态（优先于以下历史记录）
 
 2026-10-17：二进制 TLS v2 + 有界 4 MiB 顺序窗口 + 协商二进制本地 IPC 已完成双机原生测试。Mac→Windows Explorer 三文件 26.716 s（旧 Agent 217.532 s）；Windows→Mac Finder 两轮 39.625/39.374 s，所有哈希一致。原生证明与探针分开记录于 docs/PERFORMANCE_LAYERED.md，协议在 docs/TRANSPORT_V2.md。400 Mbps 双向目标尚未达到，10G 未验收。

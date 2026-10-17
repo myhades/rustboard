@@ -22,3 +22,7 @@ Desktop.ini
 /native/macos/build/
 **/DerivedData/
 **/xcuserdata/
+
+# Python test helper bytecode
+__pycache__/
+*.py[cod]

@@ -1,9 +1,13 @@
 #[cfg(any(windows, target_os = "macos"))]
+pub mod cli;
+#[cfg(any(windows, target_os = "macos"))]
 mod config;
 #[cfg(any(windows, target_os = "macos"))]
 mod image_file;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(any(windows, target_os = "macos"))]
+mod pairing;
 #[cfg(windows)]
 pub mod windows;
 

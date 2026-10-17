@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-17",
+  "windows": {
+    "stop_process_and_autostart": true,
+    "start_process_and_autostart": true,
+    "restart": true,
+    "redirected_restart_returns": true,
+    "editor_receives_config_path": true,
+    "mode_restart_only": true
+  },
+  "macos": {
+    "user_signed": true,
+    "stop_unloads_and_disables_launchd": true,
+    "start_loads_and_enables": true,
+    "restart": true,
+    "disabled_status_parser_fixed": true,
+    "editor_override_dispatch": true
+  },
+  "post_pair_native_unicode_both_directions": true,
+  "os_reboot": "NOT_TESTED"
+}

@@ -1,5 +1,16 @@
 # Rustboard 续开发记录 — 2026-10-17
 
+## CLI 收敛与交互配对（最新）
+
+两端安装版已更新。公开命令：status/start/stop/restart/config/pair/unpair，标准 --help/--version；status --json 用于脚本。start 立即启动并启用登录启动；stop 立即停止并禁用登录启动，Mac 不再被 KeepAlive 拉起。pause/resume/mode/peers/doctor 不再作为公开命令；mode 在 config 中设置，旧 paused 字段启动时移除。
+
+pair 无参数开启 120 秒临时 TLS 配对入口（同步端口 + 1）；带 IP[:port] 主动连接，省略端口默认 45452。双方核对证书指纹并分别确认后才保存；重启生效。终端失联 10 秒后自动撤销窗口。临时入口不处理剪贴板/文件；原同步 TLS pin 验证未放宽。unpair 必须按地址定位，离线也可修改配置。
+
+Windows 和 Mac 已实测停止/禁用自启、启动/启用、重启。已撤销两端旧配对后通过新流程双机配对，独立核对指纹、双方确认并重启，原身份及配对恢复，双向原生文本通过。Windows 双进程测试覆盖拒绝不保存、双确认、重启前不应用、地址撤销、终端关闭过期。Mac 用户签名目录 test-output/cli-0.1.0/repo；主工作区未改。Mac 构建空间不足时仅删除本轮失败 debug 缓存，并复用 credentials-0.1.0/repo/target 的编译缓存；旧 target/macos 已签名产物保留。
+
+状态不冒充持续连接健康探测；整机重启/登录未测试。两边保持服务和登录启动启用。验收见 docs/test-results/cli/ 和 docs/PROTOTYPE_RESULTS.md。未自动推送。
+
+
 ## 单配置与系统私钥存储（最新）
 
 Windows 正式安装已迁移为 schema-2 config.json，包含 peers 和 DPAPI 加密私钥；原 identity.json / peers.json 已移除，指纹与配对保留。所有配置修改（含 CLI pair/unpair/pause/resume/mode）均需手动重启，返回 restart_required，status/peers 显示运行状态。当前正常同步。

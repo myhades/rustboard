@@ -5,3 +5,4 @@ pub mod local_files;
 pub mod virtual_files;
 
 pub(crate) mod credential;
+pub(crate) mod service;

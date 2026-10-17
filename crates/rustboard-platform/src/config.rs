@@ -10,7 +10,19 @@ use rustboard_core::{
 };
 use serde_json::{Value, json};
 use std::{io::Write, net::SocketAddr, path::Path, sync::Mutex};
+static ACTIVE: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
+fn file_lock(dir: &Path) -> Result<std::fs::File> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(dir.join("config.lock"))?;
+    file.try_lock()
+        .map_err(|e| anyhow::anyhow!("config is busy: {e}"))?;
+    Ok(file)
+}
 fn read_json(path: &Path) -> Result<Value> {
     ensure!(
         std::fs::metadata(path)?.len() <= 131072,
@@ -23,7 +35,7 @@ pub fn load(dir: &Path) -> Result<Value> {
     let value = if path.exists() {
         read_json(&path)?
     } else {
-        json!({"listen":null,"mode":"all","paused":false})
+        json!({"listen":null,"mode":"all"})
     };
     validate(&value)?;
     Ok(value)
@@ -39,7 +51,8 @@ fn validate(value: &Value) -> Result<()> {
         "unknown config key"
     );
     ensure!(
-        value["paused"].is_boolean() && matches!(value["mode"].as_str(), Some("text" | "all")),
+        (value["paused"].is_null() || value["paused"].is_boolean())
+            && matches!(value["mode"].as_str(), Some("text" | "all")),
         "invalid mode/paused config"
     );
     if !value["listen"].is_null() {
@@ -103,6 +116,7 @@ fn restore(value: &Value) -> Result<Identity> {
 /// Singleton must be acquired first. Never regenerate on credential store failure.
 pub fn startup(dir: &Path) -> Result<(Identity, Vec<Peer>)> {
     let _guard = WRITE_LOCK.lock().unwrap();
+    let _file_guard = file_lock(dir)?;
     let mut value = load(dir)?;
     if value["schema"].is_null() {
         ensure!(
@@ -150,11 +164,15 @@ pub fn startup(dir: &Path) -> Result<(Identity, Vec<Peer>)> {
     if dir.join("peers.json").exists() {
         std::fs::remove_file(dir.join("peers.json"))?;
     }
+    if value.as_object_mut().unwrap().remove("paused").is_some() {
+        write(dir, &value)?;
+    }
+    let _ = ACTIVE.set(value);
     Ok((identity, peers))
 }
 pub fn apply(dir: &Path, engine: &mut Engine) -> Result<Option<SocketAddr>> {
     let value = load(dir)?;
-    engine.paused = value["paused"].as_bool().unwrap();
+    engine.paused = false;
     engine.text_only = value["mode"] == "text";
     value["listen"]
         .as_str()
@@ -165,14 +183,13 @@ pub fn apply(dir: &Path, engine: &mut Engine) -> Result<Option<SocketAddr>> {
 /// CLI writes desired config only; running peers/mode remain unchanged until restart.
 pub fn update(dir: &Path, own_pin: &str, args: &[String]) -> Result<Value> {
     let _guard = WRITE_LOCK.lock().unwrap();
+    let _file_guard = file_lock(dir)?;
     let mut value = load(dir)?;
     ensure!(
         value["schema"] == 2,
         "restart Agent to migrate config first"
     );
     match args[0].as_str() {
-        "pause" => value["paused"] = true.into(),
-        "resume" => value["paused"] = false.into(),
         "mode" => {
             ensure!(
                 args.len() == 2 && ["text", "all"].contains(&args[1].as_str()),
@@ -209,6 +226,28 @@ pub fn update(dir: &Path, own_pin: &str, args: &[String]) -> Result<Value> {
         json!({"ok":true,"restart_required":true,"message":"Configuration saved; restart Agent to apply. Existing connections remain active until restart."}),
     )
 }
+
+pub fn status(node: &rustboard_core::transport::Node, dir: &Path) -> Result<Value> {
+    let desired = load(dir)?;
+    let active = ACTIVE.get();
+    Ok(
+        json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"fingerprint":node.identity.pin(),"device_id":node.identity.device(),"mode":if node.engine.lock().unwrap().text_only{"text"}else{"all"},"listen":active.map(|v| &v["listen"]),"peers":*node.peers.lock().unwrap(),"pending_restart":active.is_some_and(|v|v!=&desired)}),
+    )
+}
+pub fn unpair_address(dir: &Path, address: std::net::SocketAddr) -> Result<()> {
+    let _guard = WRITE_LOCK.lock().unwrap();
+    let _file_guard = file_lock(dir)?;
+    let mut value = load(dir)?;
+    let mut next = peers(&value)?;
+    ensure!(
+        next.iter().filter(|p| p.address == address).count() == 1,
+        "address absent or ambiguous; inspect status/config"
+    );
+    next.retain(|p| p.address != address);
+    value["peers"] = serde_json::to_value(next)?;
+    write(dir, &value)
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -242,10 +281,11 @@ mod tests {
         update(&dir, &identity.pin(), &["unpair".into(), remote.pin()]).unwrap();
         assert_eq!(active.len(), 1);
         assert!(startup(&dir).unwrap().1.is_empty());
-        update(&dir, &identity.pin(), &["pause".into()]).unwrap();
+        update(&dir, &identity.pin(), &["mode".into(), "text".into()]).unwrap();
         let mut engine = Engine::new(identity.device());
         apply(&dir, &mut engine).unwrap();
-        assert!(engine.paused);
+        assert!(engine.text_only);
+        assert!(!engine.paused);
         let mut broken = load(&dir).unwrap();
         broken["identity"]["private_key"]["blob"] = json!([1, 2, 3]);
         write(&dir, &broken).unwrap();

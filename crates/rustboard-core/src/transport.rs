@@ -105,6 +105,7 @@ impl Peer {
 
 #[derive(Debug)]
 struct Pins {
+    pairing: bool,
     pins: Vec<String>,
 }
 fn verify_pin(
@@ -138,7 +139,9 @@ impl ServerCertVerifier for Pins {
         _: &[u8],
         _: UnixTime,
     ) -> std::result::Result<ServerCertVerified, rustls::Error> {
-        verify_pin(cert, &self.pins)?;
+        if !self.pairing {
+            verify_pin(cert, &self.pins)?;
+        }
         Ok(ServerCertVerified::assertion())
     }
     fn verify_tls12_signature(
@@ -173,7 +176,9 @@ impl ClientCertVerifier for Pins {
         _: &[CertificateDer<'_>],
         _: UnixTime,
     ) -> std::result::Result<ClientCertVerified, rustls::Error> {
-        verify_pin(cert, &self.pins)?;
+        if !self.pairing {
+            verify_pin(cert, &self.pins)?;
+        }
         Ok(ClientCertVerified::assertion())
     }
     fn verify_tls12_signature(
@@ -274,6 +279,7 @@ fn connect_version(identity: &Identity, peer: &Peer, legacy: bool) -> Result<Cli
         .with_protocol_versions(&[&version::TLS13])?
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(Pins {
+            pairing: false,
             pins: vec![peer.fingerprint.clone()],
         }))
         .with_client_auth_cert(
@@ -560,7 +566,10 @@ impl Node {
         let mut config =
             ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
                 .with_protocol_versions(&[&version::TLS13])?
-                .with_client_cert_verifier(Arc::new(Pins { pins }))
+                .with_client_cert_verifier(Arc::new(Pins {
+                    pins,
+                    pairing: false,
+                }))
                 .with_single_cert(
                     vec![CertificateDer::from(self.identity.cert.clone())],
                     self.identity.key(),
@@ -1118,3 +1127,5 @@ mod tests {
         server.join().unwrap();
     }
 }
+
+pub mod pairing;

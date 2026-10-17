@@ -277,3 +277,4 @@ pub fn run() -> Result<()> {
 }
 
 pub(crate) mod credential;
+pub(crate) mod service;

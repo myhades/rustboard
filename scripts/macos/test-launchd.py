@@ -21,7 +21,7 @@ values={'Label':label,'ProgramArguments':[str(base/'bin/rustboardd')],
 plist.write_bytes(plistlib.dumps(values))
 env=dict(os.environ,RUSTBOARD_PROFILE='launchtest')
 def doctor():
-    p=subprocess.run([str(base/'bin/rustboard'),'doctor'],capture_output=True,text=True,env=env,timeout=3)
+    p=subprocess.run([str(base/'bin/rustboard'),'status','--json'],capture_output=True,text=True,env=env,timeout=3)
     return json.loads(p.stdout) if p.returncode==0 else None
 def wait_service():
     for _ in range(50):
@@ -40,6 +40,6 @@ try:
     def pid(text):return next(line.strip() for line in text.splitlines() if line.strip().startswith('pid ='))
     assert pid(before)!=pid(after)
     assert first['fingerprint']==second['fingerprint']
-    print(json.dumps({'status':'PASS','build':str(source),'before':pid(before),'after':pid(after),'ipc':'signed CLI doctor before/after','identity_persisted':True,'scope':'same-login process recovery; NOT File Provider fetch, login, or machine reboot'},indent=2))
+    print(json.dumps({'status':'PASS','build':str(source),'before':pid(before),'after':pid(after),'ipc':'signed CLI status before/after','identity_persisted':True,'scope':'same-login process recovery; NOT File Provider fetch, login, or machine reboot'},indent=2))
 finally:
     subprocess.run(['launchctl','bootout',target],check=True)

@@ -280,17 +280,13 @@ impl Server {
             "invalid command"
         );
         match args[0].as_str() {
-            "status" | "doctor" => {
-                let e = node.engine.lock().unwrap();
-                return Ok(
-                    serde_json::json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"protocol":1,"device_id":node.identity.device(),"fingerprint":node.identity.pin(),"paused":e.paused,"mode":if e.text_only{"text"}else{"all"},"offer_id":e.current.as_ref().map(|o|&o.offer_id),"peers":node.peers.lock().unwrap().len(),"native":"win32-ole","network":"TLS1.3 certificate pins; listener opt-in"}),
-                );
+            "status" | "doctor" => return crate::config::status(node, &self.dir),
+            "pair-begin" | "pair-poll" | "pair-approve" | "pair-cancel" => {
+                return crate::pairing::control(node, &self.dir, &args);
             }
-            "peers" => {
-                return Ok(serde_json::json!({"ok":true,"peers":*node.peers.lock().unwrap()}));
-            }
-            "pause" | "resume" | "mode" | "pair" | "unpair" => {
-                return crate::config::update(&self.dir, &node.identity.pin(), &args);
+            "unpair-address" => {
+                ensure!(args.len() == 2, "address required");
+                crate::config::unpair_address(&self.dir, args[1].parse()?)?;
             }
             "stop" => node.stop.store(true, Ordering::Release),
             _ => anyhow::bail!("unknown command"),

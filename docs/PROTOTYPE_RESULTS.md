@@ -1,5 +1,19 @@
 # Rustboard 0.1.0 prototype acceptance
 
+## CLI and enrollment follow-up (latest)
+
+- Public CLI consolidated to status/start/stop/restart/config/pair/unpair; --help/--version and status --json. Removed public pause/resume/mode/peers/doctor. Legacy paused config removed on startup; mode remains in config.
+- Windows installed service: stop removed current-user Run registration and the process; start restored both; restart preserved enablement and identity. Redirected CLI stdout/stderr no longer stay open in the spawned Agent (explicit standard-handle inheritance guard).
+- User-signed macOS installed service: stop disabled launchd and unloaded the job; start enabled and loaded it; restart retained identity. Corrected launchctl print-disabled parsing for both boolean and enabled/disabled output, with a regression test.
+- Physical two-device enrollment: unpaired and restarted BOTH installed Agents, opened Mac pairing window, connected Windows CLI, compared displayed fingerprints against independently obtained local identities, confirmed BOTH, saved and restarted BOTH. Original identities and pair addresses restored. Subsequent Win32/AppKit Unicode clipboard sync passed in both directions.
+- Windows isolated two-Agent test: decline leaves both configs unchanged; bilateral confirmation saves both; active peers unchanged until restart; address unpair and unknown-address rejection; forced CLI exit closes the temporary listener after heartbeat expiry.
+- Pairing TLS test on both OSes verifies certificate possession/identity and rejects normal sync ALPN on the enrollment endpoint. Existing untrusted sync rejection tests remain passing. Pairing uses only TLS 1.3, no new cryptographic algorithm.
+- Config editor dispatch: Windows helper received the exact installed config path; Mac VISUAL override dispatched successfully. Windows mode edit showed pending restart, applied only after restart, then restored all. No extra GUI editor usability claim.
+- Full workspace tests passed on both platforms (Mac release profile reused cache due disk pressure), plus Windows fmt/Clippy. No full OS reboot, fresh login, new Finder copy benchmark or exhaustive adverse-network enrollment test claimed.
+
+Current packages are under target/prototype/cli. Earlier package manifests and credential/image results below remain historical.
+
+
 ## Credential/config follow-up (latest)
 
 Windows installed Agent has migrated to schema-2 single config and current-user DPAPI, retaining its original fingerprint and one peer. Legacy identity.json and peers.json are removed. Tested pending pause remains inactive until restart, then applies; restored normal operation after another restart. Unit tests cover tampering, wrong certificate/key, interrupted migration cleanup, duplicate peers and malformed config. No plaintext identity fallback.

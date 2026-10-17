@@ -1,0 +1,7 @@
+{
+  "decline_no_save": true,
+  "mutual_confirm_save": true,
+  "pending_restart": true,
+  "address_unpair": true,
+  "terminal_exit_listener_closed": true
+}

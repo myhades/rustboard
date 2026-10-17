@@ -2,10 +2,10 @@
 """Prepare an isolated real TLS peer. Finder Cmd+V remains a native user/UI action.
 Never labels loopback as cross-machine or a byte-copy as Finder acceptance.
 """
-import argparse,json,os,subprocess,time
+import argparse,json,os,subprocess,time,signal
 from pathlib import Path
 root=Path(__file__).resolve().parents[2]
-p=argparse.ArgumentParser();p.add_argument('action',choices=['prepare','status','files','text','pause','resume','evict','stop']);p.add_argument('--sizes',default='4096,67108864,1073741824');p.add_argument('--ttl-ms',type=int,default=600000);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('action',choices=['prepare','status','files','text','evict','stop']);p.add_argument('--sizes',default='4096,67108864,1073741824');p.add_argument('--ttl-ms',type=int,default=600000);a=p.parse_args()
 if not 1<=a.ttl_ms<=600000:p.error('--ttl-ms must be 1..600000')
 out=root/'test-output/macos/acceptance';out.mkdir(parents=True,exist_ok=True)
 base=root/'target/macos';host=base/'Rustboard.app/Contents/MacOS/Rustboard';cli=base/'bin/rustboard'
@@ -28,7 +28,7 @@ if a.action=='prepare':
     try:
         for attempt in range(50):
             if agent.poll() is not None:raise RuntimeError('Agent exited; inspect agent.txt')
-            try:doctor=control('doctor');break
+            try:doctor=control('status','--json');break
             except subprocess.CalledProcessError:time.sleep(.1)
         else:raise RuntimeError('Agent did not start')
         for name in ['command.txt','peer-pin.txt']:(out/name).unlink(missing_ok=True)
@@ -39,7 +39,19 @@ if a.action=='prepare':
             if peer.poll() is not None:raise RuntimeError('Peer exited')
             time.sleep(.1)
         pin=(out/'peer-pin.txt').read_text().strip()
-        control('pair','127.0.0.1:45442','--fingerprint',pin)
+        # The synthetic peer has no interactive enrollment UI. Configure only this
+        # isolated profile offline; real-device enrollment is tested separately.
+        agent.terminate();agent.wait(timeout=10)
+        team=next(line.split('=',1)[1] for line in info.splitlines() if line.startswith('TeamIdentifier='))
+        config=Path.home()/f'Library/Group Containers/{team}.org.rustboard.shared/acceptance/config.json'
+        value=json.loads(config.read_text());value['peers']=[dict(address='127.0.0.1:45442',fingerprint=pin)]
+        temporary=config.with_suffix('.test.tmp');temporary.write_text(json.dumps(value));temporary.chmod(0o600);temporary.replace(config)
+        with (out/'agent.txt').open('a') as log:
+            agent=subprocess.Popen([str(base/'bin/rustboardd'),'--listen','127.0.0.1:45441'],env=env,stdout=log,stderr=log,start_new_session=True)
+        for attempt in range(50):
+            try:control('status','--json');break
+            except subprocess.CalledProcessError:time.sleep(.1)
+        else:raise RuntimeError('Configured Agent did not restart')
         (out/'session.json').write_text(json.dumps({'agent_pid':agent.pid,'peer_pid':peer.pid,'profile':'acceptance','agent_fingerprint':doctor['fingerprint'],'peer_fingerprint':pin},indent=2))
         (out/'sizes.txt').write_text(a.sizes)
         (out/'ttl-ms.txt').write_text(str(a.ttl_ms))
@@ -52,13 +64,16 @@ elif a.action in ['files','text']:
         (out/'sizes.txt').write_text(a.sizes)
         (out/'ttl-ms.txt').write_text(str(a.ttl_ms))
     write_command(a.action)
-elif a.action in ['pause','resume']:print(control(a.action))
 elif a.action=='evict':subprocess.run([str(host),'revoke'],env=env,check=True)
 elif a.action=='status':
-    print(json.dumps(control('status'),indent=2))
+    print(json.dumps(control('status','--json'),indent=2))
     print((out/'reads.json').read_text() if (out/'reads.json').exists() else 'No source metrics yet')
 else:
-    if (out/'peer-pin.txt').exists():control('unpair',(out/'peer-pin.txt').read_text().strip())
-    control('stop');write_command('stop')
+    state=json.loads((out/'session.json').read_text());pid=state['agent_pid']
+    expected=str(base/'bin/rustboardd')+' --listen 127.0.0.1:45441'
+    actual=subprocess.check_output(['/bin/ps','-p',str(pid),'-o','command='],text=True).strip()
+    if actual!=expected:raise RuntimeError('Recorded PID is not the isolated acceptance Agent; refusing stop')
+    subprocess.run([str(cli),'unpair','127.0.0.1:45442'],env=env,check=True)
+    os.kill(pid,signal.SIGTERM);write_command('stop')
     subprocess.run([str(host),'remove'],env=env,check=True)
     print('Stopped acceptance profile and removed only its domain; retained evidence and identity.')

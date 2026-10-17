@@ -32,7 +32,7 @@ try {
     }
     foreach ($name in 'rustboard.exe','rustboardd.exe') {Copy-Item -LiteralPath (Join-Path $Source $name) -Destination (Join-Path $bin $name) -Force}
     $configPath=Join-Path $data 'config.json'
-    $config=[pscustomobject]@{listen=$null;mode='all';paused=$false}
+    $config=[pscustomobject]@{listen=$null;mode='all'}
     if (Test-Path -LiteralPath $configPath) { $config=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
     if ($Listen) {$config.listen=$Listen}
     if (!$config.listen) {throw 'First install requires -Listen <LAN-IP:port>'}
@@ -40,7 +40,7 @@ try {
     & (Join-Path $PSScriptRoot 'autostart.ps1') -Action Install -Agent $agent
     Start-Process -FilePath $agent -WindowStyle Hidden -RedirectStandardOutput (Join-Path $base 'agent.out.log') -RedirectStandardError (Join-Path $base 'agent.err.log') | Out-Null
     for ($i=0; $i -lt 50; $i++) {
-        $result=& $cli doctor 2>$null
+        $result=& $cli status --json 2>$null
         if ($LASTEXITCODE -eq 0) { $result; Write-Output "Installed in $bin; user login startup enabled."; return }
         Start-Sleep -Milliseconds 100
     }

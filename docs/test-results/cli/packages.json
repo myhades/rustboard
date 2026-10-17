@@ -1,0 +1,10 @@
+{
+  "rustboard-0.1.0-prototype-macos.tar.gz": {
+    "sha256": "a309cfec3787be826cff4d6861179fe8ee24007a8fabe36318622963ad60c775",
+    "bytes": 1925892
+  },
+  "rustboard-0.1.0-prototype-windows-x64.zip": {
+    "sha256": "96b0d1700083fae0294bafc70213a10bf690f34ef90ea7108ff7d87cb03632ad",
+    "bytes": 1745635
+  }
+}

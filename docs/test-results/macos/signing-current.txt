@@ -1,0 +1,2 @@
+/Users/myhades/Documents/GitHub/rustboard/target/macos/bin/rustboardd: replacing existing signature
+/Users/myhades/Documents/GitHub/rustboard/target/macos/bin/rustboardd: errSecInternalComponent

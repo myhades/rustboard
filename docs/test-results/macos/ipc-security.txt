@@ -1,0 +1,6 @@
+{
+  "ok": true
+}
+PASS socket0600, parent0700, same-UID non-Rustboard Python client denied
+PASS signed same-team Rustboard CLI authenticated
+Scope: first signed build; second-user isolation and corrected sandbox client pending

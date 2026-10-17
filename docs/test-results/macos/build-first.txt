@@ -1,0 +1,32 @@
+   Compiling libc v0.2.190
+   Compiling rustboard-platform v0.1.0 (/Users/myhades/Documents/GitHub/rustboard/crates/rustboard-platform)
+   Compiling getrandom v0.2.17
+   Compiling getrandom v0.4.3
+   Compiling cpufeatures v0.2.17
+   Compiling sha2 v0.10.9
+   Compiling uuid v1.28.0
+   Compiling ring v0.17.14
+   Compiling rustls-webpki v0.103.15
+   Compiling rcgen v0.14.10
+   Compiling rustls v0.23.46
+   Compiling rustboard-core v0.1.0 (/Users/myhades/Documents/GitHub/rustboard/crates/rustboard-core)
+error: failed to run custom build command for `rustboard-platform v0.1.0 (/Users/myhades/Documents/GitHub/rustboard/crates/rustboard-platform)`
+
+Caused by:
+  process didn't exit successfully: `/Users/myhades/Documents/GitHub/rustboard/target/debug/build/rustboard-platform-763752024e4ca913/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=../../native/macos/Bridge.swift
+  cargo:rerun-if-changed=../../native/macos/Security.swift
+
+  --- stderr
+  ../../native/macos/Security.swift:10:41: error: cannot convert value of type 'SecCode' to expected argument type 'SecStaticCode'
+   8 |     guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { throw SecurityFailure.denied }
+   9 |     var info: CFDictionary?
+  10 |     guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+     |                                         `- error: cannot convert value of type 'SecCode' to expected argument type 'SecStaticCode'
+  11 |           let team = (info as? [String: Any])?[kSecCodeInfoTeamIdentifier as String] as? String,
+  12 |           team.count == 10, team.allSatisfy({ $0.isASCII && $0.isLetter || $0.isNumber }) else { throw SecurityFailure.denied }
+
+  thread 'main' (3816691) panicked at crates/rustboard-platform/build.rs:9:5:
+  Swift bridge compilation failed
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

@@ -1,0 +1,2 @@
+target/macos/bin/rustboardd: replacing existing signature
+target/macos/bin/rustboardd: errSecInternalComponent

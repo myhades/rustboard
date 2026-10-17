@@ -1,0 +1,3 @@
+total 0
+drwx------   2 myhades  staff   64 Oct 17 01:50 .
+drwx------@ 12 myhades  staff  384 Oct 17 01:09 ..

@@ -212,6 +212,9 @@ pub fn connect(identity: &Identity, peer: &Peer) -> Result<Client> {
     Ok(stream)
 }
 
+type IpcSourceKey = (String, String, String, String);
+type SharedConnection = Arc<Mutex<Option<Client>>>;
+
 pub struct Node {
     pub identity: Identity,
     pub engine: Mutex<Engine>,
@@ -220,6 +223,8 @@ pub struct Node {
     /// Only the latest accepted offer is queued: bounded even if clipboard STA is busy.
     pub incoming: Mutex<Option<(Offer, Peer)>>,
     active: AtomicUsize,
+    // Bounded transport cache only: no file bytes, and every IPC read reauthorizes.
+    ipc_connections: Mutex<Vec<(IpcSourceKey, SharedConnection)>>,
 }
 impl Node {
     /// Portable File Provider/FUSE IPC operations; OS adapter authenticates the local caller.
@@ -275,17 +280,45 @@ impl Node {
                         .cloned()
                         .ok_or_else(|| anyhow::anyhow!("unauthorized"))?;
                     ensure!(file.size.is_some(), "unknown size unsupported");
-                    Arc::new(RemoteSource::new(self.clone(), peer, offer, file))
+                    let key = (
+                        offer.source_device.clone(),
+                        offer.offer_id.clone(),
+                        file.file_id.clone(),
+                        file.version.clone(),
+                    );
+                    let connection = {
+                        let mut cache = self.ipc_connections.lock().unwrap();
+                        cache.retain(|(k, _)| k.0 == key.0 && k.1 == key.1);
+                        if let Some((_, connection)) = cache.iter().find(|(k, _)| *k == key) {
+                            connection.clone()
+                        } else {
+                            if cache.len() >= 2 {
+                                cache.remove(0);
+                            }
+                            let connection = Arc::new(Mutex::new(None));
+                            cache.push((key, connection.clone()));
+                            connection
+                        }
+                    };
+                    let mut remote = RemoteSource::new(self.clone(), peer, offer, file);
+                    remote.connection = connection;
+                    Arc::new(remote)
                 };
                 ensure!(offset <= source.len(), "invalid range");
                 let mut bytes = vec![0; length as usize];
                 let n = source.read_at(offset, &mut bytes)?;
                 bytes.truncate(n);
+                if offset + n as u64 == source.len() {
+                    self.ipc_connections.lock().unwrap().retain(|(key, _)| {
+                        key.1 != offer_id || key.2 != file_id || key.3 != version
+                    });
+                }
                 Ok(
                     serde_json::json!({"ok":true,"protocol":1,"response":Message::Data{request_id,offset,eof:offset+n as u64==source.len(),bytes}}),
                 )
             }
             IpcOperation::Cancel { request_id } => {
+                self.ipc_connections.lock().unwrap().clear();
                 Ok(serde_json::json!({"ok":true,"protocol":1,"request_id":request_id}))
             }
             IpcOperation::Control { .. } => {
@@ -301,6 +334,7 @@ impl Node {
             stop: AtomicBool::new(false),
             incoming: Mutex::new(None),
             active: AtomicUsize::new(0),
+            ipc_connections: Mutex::new(Vec::new()),
         })
     }
     fn trusted(&self, pin: &str) -> bool {
@@ -533,7 +567,7 @@ pub struct RemoteSource {
     pub peer: Peer,
     pub offer: Offer,
     pub file: FileEntry,
-    connection: Mutex<Option<Client>>,
+    connection: SharedConnection,
 }
 impl RemoteSource {
     pub fn new(node: Arc<Node>, peer: Peer, offer: Offer, file: FileEntry) -> Self {
@@ -542,7 +576,7 @@ impl RemoteSource {
             peer,
             offer,
             file,
-            connection: Mutex::new(None),
+            connection: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -652,10 +686,31 @@ mod tests {
         let server = a.serve(listener).unwrap();
         b.sync_once(&peer).unwrap();
         assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
-        let remote = RemoteSource::new(b.clone(), peer.clone(), offer, file);
+        let ipc_read = || IpcOperation::Read {
+            request_id: 7,
+            offer_id: offer.offer_id.clone(),
+            file_id: file.file_id.clone(),
+            version: file.version.clone(),
+            offset: 250,
+            length: 100,
+        };
+        let remote = RemoteSource::new(b.clone(), peer.clone(), offer.clone(), file.clone());
         let mut bytes = [0; 100];
         assert_eq!(remote.read_at(250, &mut bytes).unwrap(), 100);
         assert_eq!(&bytes[..3], &[250, 0, 1]);
+        for _ in 0..2 {
+            let reply = b.local_ipc(ipc_read()).unwrap();
+            assert_eq!(reply["response"]["bytes"][0], 250);
+        }
+        assert_eq!(b.ipc_connections.lock().unwrap().len(), 1);
+        assert_eq!(source.bytes_read.load(Ordering::Relaxed), 300);
+        // Existing cached TLS sessions must still fail after receiver-side unpair.
+        b.peers.lock().unwrap().clear();
+        assert!(b.local_ipc(ipc_read()).is_err());
+        assert_eq!(source.bytes_read.load(Ordering::Relaxed), 300);
+        b.peers.lock().unwrap().push(peer.clone());
+        b.local_ipc(IpcOperation::Cancel { request_id: 7 }).unwrap();
+        assert!(b.ipc_connections.lock().unwrap().is_empty());
         let stranger = Identity::generate().unwrap();
         let outcome = connect(&stranger, &peer).and_then(|mut unknown| {
             write_frame(&mut unknown, &Message::Poll)?;

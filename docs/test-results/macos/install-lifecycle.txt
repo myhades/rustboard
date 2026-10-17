@@ -1,0 +1,29 @@
+File Provider failure domain=NSCocoaErrorDomain code=516
+Removed Rustboard app and login agent. Identity, pairing, and diagnostic data are retained.
+{
+  "device_id": "32638316-c861-df9f-2cac-0c313eb868d9",
+  "fingerprint": "32638316c861df9f2cac0c313eb868d9254d68d46a2c6084bfa8258aad5f7b71",
+  "mode": "all",
+  "native": "macos-appkit-fileprovider",
+  "network": "TLS1.3 certificate pins; listener opt-in",
+  "offer_id": null,
+  "ok": true,
+  "paused": false,
+  "peers": 0,
+  "protocol": 1,
+  "version": "0.1.0"
+}
+{
+  "device_id": "32638316-c861-df9f-2cac-0c313eb868d9",
+  "fingerprint": "32638316c861df9f2cac0c313eb868d9254d68d46a2c6084bfa8258aad5f7b71",
+  "mode": "all",
+  "native": "macos-appkit-fileprovider",
+  "network": "TLS1.3 certificate pins; listener opt-in",
+  "offer_id": null,
+  "ok": true,
+  "paused": false,
+  "peers": 0,
+  "protocol": 1,
+  "version": "0.1.0"
+}
+Removed Rustboard app and login agent. Identity, pairing, and diagnostic data are retained.

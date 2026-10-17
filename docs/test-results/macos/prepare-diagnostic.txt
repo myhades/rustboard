@@ -1,0 +1,2 @@
+Error: No such file or directory (os error 2)
+Prepared synthetic loopback; NOT cross-machine. Inspect reads.json and dataless stat before real Finder Cmd+V.

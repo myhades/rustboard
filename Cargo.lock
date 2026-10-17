@@ -429,6 +429,7 @@ name = "rustboard-platform"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "rustboard-core",
  "serde_json",
  "windows",

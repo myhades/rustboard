@@ -1,0 +1,15 @@
+{
+  "signature_request": "1b9cb73a817244e2819e925f8a753231",
+  "after_launchd_kickstart": [
+    "pid = 84423"
+  ],
+  "fingerprint": "f87d38c8535b83941e6d2a39380d8a3b4df2cd919a0820056abbf81716057bd6",
+  "artifacts_sha256": {
+    "target/macos/bin/rustboardd": "eabd289232d18214f9381b4b975503a40dbdb23ed9b113f4d108e70ac5615428",
+    "target/macos/bin/rustboard": "5f70c2ed9be8931702d75284b4b6174978c3122a23d7efc3c747ab4960024bb3",
+    "target/macos/Rustboard.app/Contents/MacOS/Rustboard": "aca18f3c5f530bada507010abba7e675e1c1cc6fb7095061bbd3d9320c55e82e",
+    "target/macos/Rustboard.app/Contents/PlugIns/RustboardProvider.appex/Contents/MacOS/RustboardProvider": "6192e4f75d039907738c51fdd8c5082937fe7a8c0489cb95f84d2ade73c09dc2"
+  },
+  "full_finder_hashes": "PASS 4KiB/64MiB/1GiB real Finder Cmd+V after launchd restart",
+  "repeat": "PASS all hashes; source counters unchanged, OS cache hit"
+}

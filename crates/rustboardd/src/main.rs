@@ -4,6 +4,10 @@ fn main() -> anyhow::Result<()> {
     {
         rustboard_platform::windows::clipboard::run()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        rustboard_platform::macos::run()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     anyhow::bail!("Native backend not installed on this platform");
 }

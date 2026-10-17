@@ -1,0 +1,2 @@
+    Finished `release` profile [optimized] target(s) in 0.03s
+Built /Users/myhades/Documents/GitHub/rustboard/target/macos/Rustboard.app; run scripts/macos/sign.sh with SIGN_IDENTITY before running.

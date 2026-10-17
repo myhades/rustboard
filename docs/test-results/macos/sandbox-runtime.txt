@@ -1,0 +1,12 @@
+Timestamp               Ty Process[PID:TID]
+2026-10-17 01:09:01.328 Df Rustboard[56121:3a8432] [com.apple.runningboard:connection] Identity resolved as anon<Rustboard>(501)
+2026-10-17 01:09:01.343 E  Rustboard[56121:3a841d] [com.apple.libsqlite3:logging-persist] os_unix.c:53009: (2) open(/private/var/db/DetachedSignatures) - No such file or directory
+2026-10-17 01:09:01.344 A  Rustboard[56121:3a841d] (Security) SecKeyVerifySignature
+2026-10-17 01:09:21.897 Df Rustboard[56186:3a8626] [com.apple.runningboard:connection] Identity resolved as anon<Rustboard>(501)
+2026-10-17 01:09:36.797 Df Rustboard[56278:3a8818] [com.apple.runningboard:connection] Identity resolved as anon<Rustboard>(501)
+2026-10-17 01:10:06.105 Df Rustboard[56413:3a8b24] [com.apple.runningboard:connection] Identity resolved as anon<Rustboard>(501)
+2026-10-17 01:10:06.110 E  Rustboard[56413:3a8b21] [com.apple.libsqlite3:logging-persist] os_unix.c:53009: (2) open(/private/var/db/DetachedSignatures) - No such file or directory
+2026-10-17 01:10:06.111 A  Rustboard[56413:3a8b21] (Security) SecKeyVerifySignature
+2026-10-17 01:10:27.096 Df Rustboard[56504:3a8da4] [com.apple.runningboard:connection] Identity resolved as anon<Rustboard>(501)
+2026-10-17 01:10:27.103 E  Rustboard[56504:3a8da0] [com.apple.libsqlite3:logging-persist] os_unix.c:53009: (2) open(/private/var/db/DetachedSignatures) - No such file or directory
+2026-10-17 01:10:27.103 A  Rustboard[56504:3a8da0] (Security) SecKeyVerifySignature

@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "build": "/Users/myhades/Documents/GitHub/rustboard/target/macos-signed-before-fix",
+  "before": "pid = 57597",
+  "after": "pid = 57609",
+  "ipc": "signed CLI doctor before/after",
+  "identity_persisted": true,
+  "scope": "same-login process recovery; NOT File Provider fetch, login, or machine reboot"
+}

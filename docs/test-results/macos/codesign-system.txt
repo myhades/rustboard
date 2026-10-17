@@ -1,0 +1,54 @@
+Timestamp               Ty Process[PID:TID]
+2026-10-17 01:07:44.717 Df codesign[55707:3a7afd] [com.apple.xpc:connection] [0x104e56ab0] activating connection: mach=true listener=false peer=false name=com.apple.analyticsd
+2026-10-17 01:07:44.717 A  codesign[55707:3a7afd] (Security) SecIdentityCopyPreference
+2026-10-17 01:07:44.717 A  codesign[55707:3a7afd] (libsystem_info.dylib) Retrieve User by ID
+2026-10-17 01:07:44.718 Df codesign[55707:3a7afd] [com.apple.xpc:connection] [0x104e59670] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.agent
+2026-10-17 01:07:44.718 A  codesign[55707:3a7afd] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-10-17 01:07:44.718 Df codesign[55707:3a7afd] [com.apple.xpc:connection] [0x104e5a090] activating connection: mach=true listener=false peer=false name=com.apple.cfprefsd.daemon
+2026-10-17 01:07:44.718 A  codesign[55707:3a7afd] (CoreFoundation) Loading Preferences From System CFPrefsD
+2026-10-17 01:07:44.718 Df codesign[55707:3a7afd] [com.apple.securityd:MDSStaticDatabase] [updateDataBases]: Databases already exist; Nothing to Update
+2026-10-17 01:07:44.719 Df codesign[55707:3a7afe] [com.apple.CoreAnalytics:client] Received configuration update from daemon (initial)
+2026-10-17 01:07:44.720 A  codesign[55707:3a7afd] (Security) SecItemCopyMatching
+2026-10-17 01:07:44.720 A  codesign[55707:3a7afd] (Security) SecItemCopyMatching_ios
+2026-10-17 01:07:44.720 Df codesign[55707:3a7afd] [com.apple.securityd:secitemratelimit] Not internal release, disabling SIRL
+2026-10-17 01:07:44.720 Df codesign[55707:3a7afd] [com.apple.securityd:thread-local-client-debug] SecSecurityClientGet new thread!
+2026-10-17 01:07:44.720 Df codesign[55707:3a7afd] [com.apple.securityd:keychain] Enabling System Keychain Always due to platform
+2026-10-17 01:07:44.720 Df codesign[55707:3a7afd] [com.apple.xpc:connection] [0x104e629e0] activating connection: mach=true listener=false peer=false name=com.apple.securityd.xpc
+2026-10-17 01:07:44.723 Df codesign[55707:3a7afd] [com.apple.securityd:security_exception] CSSM Exception: -2147409622 CSSMERR_TP_NOT_TRUSTED
+2026-10-17 01:07:44.723 Df codesign[55707:3a7afd] [com.apple.securityd:security_exception] CSSM Exception: -2147409622 CSSMERR_TP_NOT_TRUSTED
+2026-10-17 01:07:44.724 Df codesign[55707:3a7afd] [com.apple.securityd:security_exception] CSSM Exception: -2147409622 CSSMERR_TP_NOT_TRUSTED
+2026-10-17 01:07:44.724 Df codesign[55707:3a7afd] [com.apple.securityd:security_exception] CSSM Exception: -2147409622 CSSMERR_TP_NOT_TRUSTED
+2026-10-17 01:07:44.724 A  codesign[55707:3a7afd] (Security) SecIdentityCopyCertificate
+2026-10-17 01:07:44.725 A  codesign[55707:3a7afd] (Security) SecIdentityCopyCertificate
+2026-10-17 01:07:44.725 A  codesign[55707:3a7afd] (Security) SecTrustEvaluateIfNecessary
+2026-10-17 01:07:44.725 Df codesign[55707:3a7afd] [com.apple.xpc:connection] [0x77e2c64000] activating connection: mach=true listener=false peer=false name=com.apple.trustd.agent
+2026-10-17 01:07:44.726 A  codesign[55707:3a7afd] (Security) SecIdentityCopyCertificate
+2026-10-17 01:07:44.727 A  codesign[55707:3a7afd] (Security) SecTrustCopyAppleTrustAnchors
+2026-10-17 01:07:44.728 A  codesign[55707:3a7afd] (Security) SecTrustCopyAppleTrustAnchors
+2026-10-17 01:07:44.728 A  codesign[55707:3a7afd] (Security) SecTrustCopyAppleTrustAnchors
+2026-10-17 01:07:44.728 A  codesign[55707:3a7afd] (Security) SecTrustCopyAppleTrustAnchors
+2026-10-17 01:07:44.728 A  codesign[55707:3a7afd] (Security) SecTrustCopyAppleTrustAnchors
+2026-10-17 01:07:44.728 A  codesign[55707:3a7afd] (Security) SecTrustCopyAppleTrustAnchors
+2026-10-17 01:07:44.736 A  codesign[55707:3a7afd] (Security) SecIdentityCopyCertificate
+2026-10-17 01:07:44.737 A  codesign[55707:3a7afd] (Security) SecIdentityCopyCertificate
+2026-10-17 01:07:44.737 A  codesign[55707:3a7afd] (Security) SecIdentityCopyPrivateKey
+2026-10-17 01:07:44.737 A  codesign[55707:3a7afd] (Security) SecKeyCopyAttributes
+2026-10-17 01:07:44.740 Df codesign[55707:3a7afd] [com.apple.securityd:security_exception] CSSM Exception: -2147415840 CSSMERR_CSP_NO_USER_INTERACTION
+2026-10-17 01:07:44.740 Df codesign[55707:3a7afd] [com.apple.securityd:security_exception] CSSM Exception: -2147415840 CSSMERR_CSP_NO_USER_INTERACTION
+2026-10-17 01:07:44.740 Df codesign[55707:3a7afd] [com.apple.securityd:integrity] caught CssmError: -2147415840 CSSMERR_CSP_NO_USER_INTERACTION
+2026-10-17 01:07:44.740 Df codesign[55707:3a7afd] [com.apple.securityd:integrity] error while checking integrity, denying access: CSSM Exception: -2147415840 CSSMERR_CSP_NO_USER_INTERACTION
+2026-10-17 01:07:44.740 A  codesign[55707:3a7afd] (Security) SecTrustEvaluateIfNecessary
+2026-10-17 01:07:44.741 A  codesign[55707:3a7afd] (Security) SecKeyVerifySignature
+2026-10-17 01:07:44.741 A  codesign[55707:3a7afd] (Security) SecKeyCreateSignature
+2026-10-17 01:07:44.741 Df codesign[55707:3a7afd] [com.apple.securityd:security_exception] CSSM Exception: -2147415840 CSSMERR_CSP_NO_USER_INTERACTION
+2026-10-17 01:07:44.741 Df codesign[55707:3a7afd] [com.apple.securityd:security_exception] CSSM Exception: -2147415840 CSSMERR_CSP_NO_USER_INTERACTION
+2026-10-17 01:07:44.741 Df codesign[55707:3a7afd] [com.apple.securityd:integrity] caught CssmError: -2147415840 CSSMERR_CSP_NO_USER_INTERACTION
+2026-10-17 01:07:44.741 Df codesign[55707:3a7afd] [com.apple.securityd:integrity] error while checking integrity, denying access: CSSM Exception: -2147415840 CSSMERR_CSP_NO_USER_INTERACTION
+2026-10-17 01:07:44.741 E  codesign[55707:3a7afd] [com.apple.security:seckey] SecKeyCreateSignature failed: Error Domain=NSOSStatusErrorDomain Code=-25308 "CSSM Exception: -2147415840 CSSMERR_CSP_NO_USER_INTERACTION" (errKCInteractionNotAllowed / errSecInteractionNotAllowed: / Interaction is not allowed with the Security Server.) UserInfo={numberOfErrorsDeep=0, NSDescription=CSSM Exception: -2147415840 CSSMERR_CSP_NO_USER_INTERACTION}
+2026-10-17 01:07:44.742 Df codesign[55707:3a7afd] [com.apple.securityd:security_exception] MacOS error: -2070
+2026-10-17 01:07:44.742 Df codesign[55707:3a7afd] [com.apple.CoreAnalytics:client] Entering exit handler.
+2026-10-17 01:07:44.742 Df codesign[55707:3a7afd] [com.apple.CoreAnalytics:client] Queueing exit procedure onto XPC queue. Any further messages sent will be discarded. activeSendTransactions=0
+2026-10-17 01:07:44.742 Df codesign[55707:3a7aff] [com.apple.CoreAnalytics:client] Cancelling XPC connection. Any further reply handler invocations will not retry messages
+2026-10-17 01:07:44.742 Df codesign[55707:3a7aff] [com.apple.xpc:connection] [0x104e56ab0] invalidated because the current process cancelled the connection by calling xpc_connection_cancel()
+2026-10-17 01:07:44.742 Df codesign[55707:3a7afd] [com.apple.CoreAnalytics:client] Exiting exit handler.
+2026-10-17 01:07:44.742 Df codesign[55707:3a7aff] [com.apple.CoreAnalytics:client] XPC connection invalidated (daemon unloaded/disabled)

@@ -1,0 +1,21 @@
+{
+  "note": "Old crash residues moved to private test-output; manual cleanup, NOT a recovery PASS",
+  "files": [
+    {
+      "file": "024A68C3-DB7F-4252-9F84-EAE2AF04FFAC",
+      "size": 45809664
+    },
+    {
+      "file": "C097E264-796D-4935-9A53-6F65281BA4AC",
+      "size": 19333120
+    },
+    {
+      "file": "D11CA3A9-345D-4B4A-9B17-B34AB1DDE89F",
+      "size": 20643840
+    },
+    {
+      "file": "EDEB786E-D8CB-40CD-93DC-F3964EB6DA27",
+      "size": 52363264
+    }
+  ]
+}

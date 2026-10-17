@@ -1,0 +1,9 @@
+Timestamp               Ty Process[PID:TID]
+2026-10-17 01:59:10.579 E  pboard[641:3c8154] [com.apple.CFPasteboard:general] Some new entries were rejected! (1 > 0)
+2026-10-17 02:00:36.413 E  pboard[641:3c9231] [com.apple.CFPasteboard:general] Some new entries were rejected! (2 > 0)
+2026-10-17 02:01:17.097 E  pboard[641:3c987f] [com.apple.CFPasteboard:general] Some new entries were rejected! (2 > 0)
+2026-10-17 02:02:18.366 E  pboard[641:3c9cb8] [com.apple.CFPasteboard:general] Some new entries were rejected! (2 > 0)
+2026-10-17 02:02:18.366 E  pboard[641:3c9cb8] [com.apple.CFPasteboard:general] Some new entries were rejected! (2 > 0)
+2026-10-17 02:04:27.621 E  pboard[641:3caeba] [com.apple.CFPasteboard:general] Some new entries were rejected! (2 > 0)
+2026-10-17 02:05:38.965 E  pboard[641:3cbb73] [com.apple.CFPasteboard:general] Some new entries were rejected! (2 > 0)
+2026-10-17 02:05:38.965 E  pboard[641:3cbb73] [com.apple.CFPasteboard:general] Some new entries were rejected! (2 > 0)

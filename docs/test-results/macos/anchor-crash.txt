@@ -1,0 +1,89 @@
+Timestamp               Ty Process[PID:TID]
+2026-10-17 01:34:35.486 Df RustboardProvider[64607:3b55a0] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInternalInconsistencyException', reason: 'page and sync anchor length shouldn't exceed 500 bytes!'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000018aa828c0 __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000018a4e060c objc_exception_throw + 88
+	2   Foundation                          0x000000018c1c94d8 -[NSCalendarDate initWithCoder:] + 0
+	3   FileProvider                        0x00000001a66b875c -[FPXObserver verifyVendorToken:].cold.1 + 68
+	4   FileProvider                        0x00000001a65fda10 -[FPXObserver verifyVendorToken:] + 172
+	5   FileProvider                        0x00000001a66015c4 __64-[FPXEnumerator enumerateItemsFromPage:suggestedPageSize:reply:]_block_invoke.184 + 76
+	6   RustboardProvider                   0x0000000104b86a98 $s17RustboardProvider10EnumeratorC17currentSyncAnchor17completionHandleryySo06NSFilebeF0aSgc_tFTo + 132
+	7   FileProvider                        0x00<…>
+2026-10-17 01:34:57.319 Df RustboardProvider[64708:3b59db] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInternalInconsistencyException', reason: 'page and sync anchor length shouldn't exceed 500 bytes!'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000018aa828c0 __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000018a4e060c objc_exception_throw + 88
+	2   Foundation                          0x000000018c1c94d8 -[NSCalendarDate initWithCoder:] + 0
+	3   FileProvider                        0x00000001a66b875c -[FPXObserver verifyVendorToken:].cold.1 + 68
+	4   FileProvider                        0x00000001a65fda10 -[FPXObserver verifyVendorToken:] + 172
+	5   FileProvider                        0x00000001a66015c4 __64-[FPXEnumerator enumerateItemsFromPage:suggestedPageSize:reply:]_block_invoke.184 + 76
+	6   RustboardProvider                   0x00000001049c6a98 $s17RustboardProvider10EnumeratorC17currentSyncAnchor17completionHandleryySo06NSFilebeF0aSgc_tFTo + 132
+	7   FileProvider                        0x00<…>
+2026-10-17 01:35:34.868 Df RustboardProvider[64843:3b630c] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInternalInconsistencyException', reason: 'page and sync anchor length shouldn't exceed 500 bytes!'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000018aa828c0 __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000018a4e060c objc_exception_throw + 88
+	2   Foundation                          0x000000018c1c94d8 -[NSCalendarDate initWithCoder:] + 0
+	3   FileProvider                        0x00000001a66b875c -[FPXObserver verifyVendorToken:].cold.1 + 68
+	4   FileProvider                        0x00000001a65fda10 -[FPXObserver verifyVendorToken:] + 172
+	5   FileProvider                        0x00000001a66015c4 __64-[FPXEnumerator enumerateItemsFromPage:suggestedPageSize:reply:]_block_invoke.184 + 76
+	6   RustboardProvider                   0x00000001020eea98 $s17RustboardProvider10EnumeratorC17currentSyncAnchor17completionHandleryySo06NSFilebeF0aSgc_tFTo + 132
+	7   FileProvider                        0x00<…>
+2026-10-17 01:36:59.078 Df RustboardProvider[66203:3b79b2] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInternalInconsistencyException', reason: 'page and sync anchor length shouldn't exceed 500 bytes!'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000018aa828c0 __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000018a4e060c objc_exception_throw + 88
+	2   Foundation                          0x000000018c1c94d8 -[NSCalendarDate initWithCoder:] + 0
+	3   FileProvider                        0x00000001a66b875c -[FPXObserver verifyVendorToken:].cold.1 + 68
+	4   FileProvider                        0x00000001a65fda10 -[FPXObserver verifyVendorToken:] + 172
+	5   FileProvider                        0x00000001a66015c4 __64-[FPXEnumerator enumerateItemsFromPage:suggestedPageSize:reply:]_block_invoke.184 + 76
+	6   RustboardProvider                   0x0000000100b0aa98 $s17RustboardProvider10EnumeratorC17currentSyncAnchor17completionHandleryySo06NSFilebeF0aSgc_tFTo + 132
+	7   FileProvider                        0x00<…>
+2026-10-17 01:37:45.492 Df RustboardProvider[66725:3b86dc] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInternalInconsistencyException', reason: 'page and sync anchor length shouldn't exceed 500 bytes!'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000018aa828c0 __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000018a4e060c objc_exception_throw + 88
+	2   Foundation                          0x000000018c1c94d8 -[NSCalendarDate initWithCoder:] + 0
+	3   FileProvider                        0x00000001a66b875c -[FPXObserver verifyVendorToken:].cold.1 + 68
+	4   FileProvider                        0x00000001a65fda10 -[FPXObserver verifyVendorToken:] + 172
+	5   FileProvider                        0x00000001a66015c4 __64-[FPXEnumerator enumerateItemsFromPage:suggestedPageSize:reply:]_block_invoke.184 + 76
+	6   RustboardProvider                   0x000000010495321c $s17RustboardProvider10EnumeratorC17currentSyncAnchor17completionHandleryySo06NSFilebeF0aSgc_tFTo + 132
+	7   FileProvider                        0x00<…>
+2026-10-17 01:37:55.494 Df RustboardProvider[66810:3b8894] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInternalInconsistencyException', reason: 'page and sync anchor length shouldn't exceed 500 bytes!'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000018aa828c0 __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000018a4e060c objc_exception_throw + 88
+	2   Foundation                          0x000000018c1c94d8 -[NSCalendarDate initWithCoder:] + 0
+	3   FileProvider                        0x00000001a66b875c -[FPXObserver verifyVendorToken:].cold.1 + 68
+	4   FileProvider                        0x00000001a65fda10 -[FPXObserver verifyVendorToken:] + 172
+	5   FileProvider                        0x00000001a66015c4 __64-[FPXEnumerator enumerateItemsFromPage:suggestedPageSize:reply:]_block_invoke.184 + 76
+	6   RustboardProvider                   0x000000010216321c $s17RustboardProvider10EnumeratorC17currentSyncAnchor17completionHandleryySo06NSFilebeF0aSgc_tFTo + 132
+	7   FileProvider                        0x00<…>
+2026-10-17 01:38:13.873 Df RustboardProvider[66902:3b9208] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInternalInconsistencyException', reason: 'page and sync anchor length shouldn't exceed 500 bytes!'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000018aa828c0 __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000018a4e060c objc_exception_throw + 88
+	2   Foundation                          0x000000018c1c94d8 -[NSCalendarDate initWithCoder:] + 0
+	3   FileProvider                        0x00000001a66b875c -[FPXObserver verifyVendorToken:].cold.1 + 68
+	4   FileProvider                        0x00000001a65fda10 -[FPXObserver verifyVendorToken:] + 172
+	5   FileProvider                        0x00000001a66015c4 __64-[FPXEnumerator enumerateItemsFromPage:suggestedPageSize:reply:]_block_invoke.184 + 76
+	6   RustboardProvider                   0x0000000100d7321c $s17RustboardProvider10EnumeratorC17currentSyncAnchor17completionHandleryySo06NSFilebeF0aSgc_tFTo + 132
+	7   FileProvider                        0x00<…>
+2026-10-17 01:38:55.381 Df RustboardProvider[69263:3ba193] (CoreFoundation) *** Terminating app due to uncaught exception 'NSInternalInconsistencyException', reason: 'page and sync anchor length shouldn't exceed 500 bytes!'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000018aa828c0 __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000018a4e060c objc_exception_throw + 88
+	2   Foundation                          0x000000018c1c94d8 -[NSCalendarDate initWithCoder:] + 0
+	3   FileProvider                        0x00000001a66b875c -[FPXObserver verifyVendorToken:].cold.1 + 68
+	4   FileProvider                        0x00000001a65fda10 -[FPXObserver verifyVendorToken:] + 172
+	5   FileProvider                        0x00000001a66015c4 __64-[FPXEnumerator enumerateItemsFromPage:suggestedPageSize:reply:]_block_invoke.184 + 76
+	6   RustboardProvider                   0x00000001049bb21c $s17RustboardProvider10EnumeratorC17currentSyncAnchor17completionHandleryySo06NSFilebeF0aSgc_tFTo + 132
+	7   FileProvider                        0x00<…>

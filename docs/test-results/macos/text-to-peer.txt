@@ -1,0 +1,1 @@
+PASS AppKit external synthetic Unicode text captured by Agent and received over mutually pinned TLS

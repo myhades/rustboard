@@ -1,0 +1,111 @@
+Error: Homebrew requires formulae to be in a tap, rejecting:
+  ./target/macos/rustboard.rb (/Users/myhades/Documents/GitHub/rustboard/target/macos/rustboard.rb)
+
+To create a tap, run e.g.
+  brew tap-new <user|org>/<repository>
+To create a formula in a tap run e.g.
+  brew create <url> --tap=<user|org>/<repository>
+Warning: tap-new is a developer command, so Homebrew's
+developer mode has been automatically turned on.
+To turn developer mode off, run:
+  brew developer off
+
+Initialized empty Git repository in /opt/homebrew/Library/Taps/rustboard/homebrew-local-acceptance/.git/
+[main (root-commit) 88c1d25] Create rustboard/local-acceptance tap
+ 5 files changed, 194 insertions(+)
+ create mode 100644 .github/dependabot.yml
+ create mode 100644 .github/workflows/autobump.yml
+ create mode 100644 .github/workflows/publish.yml
+ create mode 100644 .github/workflows/tests.yml
+ create mode 100644 README.md
+==> Created rustboard/local-acceptance
+/opt/homebrew/Library/Taps/rustboard/homebrew-local-acceptance
+
+When a pull request making changes to a formula (or formulae) becomes green
+(all checks passed), then you can publish the built bottles.
+To do so, run `brew pr-pull` locally or run the `brew pr-pull`
+workflow with the pull request number and, optionally, the pull
+request's expected head commit SHA.
+==> Trusted formula rustboard/local-acceptance/rustboard
+Warning: The following taps are not trusted:
+  tw93/tap
+
+Homebrew is currently ignoring formulae, casks and commands
+from these taps because tap trust is required.
+Untap them with:
+  brew untap tw93/tap
+Trust specific formulae, casks and commands with:
+  brew trust --formula <user>/<tap>/<formula>
+  brew trust --cask <user>/<tap>/<cask>
+  brew trust --command <user>/<tap>/<command>
+Whole-tap trust is broader and includes all current and future formulae,
+casks and commands from the listed taps. Trust whole taps with:
+  brew trust tw93/tap
+For more information, see:
+  https://docs.brew.sh/Tap-Trust
+==> Fetching downloads for: rustboard
+✔︎ Formula rustboard (0.1.0)
+==> Installing rustboard from rustboard/local-acceptance
+🍺  /opt/homebrew/Cellar/rustboard/0.1.0: 11 files, 4.4MB, built in 1 second
+==> Caveats
+==> rustboard
+The File Provider app must be installed and registered in the user's session.
+This formula deploys files; it does not bypass signing, notarization, or system approval.
+Follow docs/MACOS.md for the native app and launchd installation.
+Fetching gem metadata from https://rubygems.org/.........
+Fetching drb 2.2.3
+Fetching elftools 2.2.0
+Fetching concurrent-ruby 1.3.8
+Fetching bindata 3.0.0
+Fetching logger 1.7.0
+Fetching prism 1.9.0
+Fetching minitest 6.0.6
+Fetching patchelf 1.7.0
+Fetching plist 3.7.2
+Fetching ruby-macho 7.0.0
+Fetching sorbet-runtime 0.6.13508
+Installing drb 2.2.3
+Installing bindata 3.0.0
+Installing logger 1.7.0
+Installing elftools 2.2.0
+Installing patchelf 1.7.0
+Installing minitest 6.0.6
+Installing plist 3.7.2
+Installing concurrent-ruby 1.3.8
+Installing ruby-macho 7.0.0
+Installing sorbet-runtime 0.6.13508
+Installing prism 1.9.0 with native extensions
+Bundle complete! 38 Gemfile dependencies, 11 gems now installed.
+Bundled gems are installed into `../../../../../opt/homebrew/Library/Homebrew/vendor/bundle`
+2 installed gems you directly depend on are looking for funding.
+  Run `bundle fund` for details
+==> Testing rustboard/local-acceptance/rustboard
+==> /opt/homebrew/Cellar/rustboard/0.1.0/bin/rustboard version
+Warning: The following taps are not trusted:
+  tw93/tap
+
+Homebrew is currently ignoring formulae, casks and commands
+from these taps because tap trust is required.
+Untap them with:
+  brew untap tw93/tap
+Trust specific formulae, casks and commands with:
+  brew trust --formula <user>/<tap>/<formula>
+  brew trust --cask <user>/<tap>/<cask>
+  brew trust --command <user>/<tap>/<command>
+Whole-tap trust is broader and includes all current and future formulae,
+casks and commands from the listed taps. Trust whole taps with:
+  brew trust tw93/tap
+For more information, see:
+  https://docs.brew.sh/Tap-Trust
+==> Fetching downloads for: rustboard
+✔︎ Formula rustboard (0.1.0)
+==> Reinstalling rustboard/local-acceptance/rustboard
+🍺  /opt/homebrew/Cellar/rustboard/0.1.0: 11 files, 4.4MB, built in 0 seconds
+==> Caveats
+==> rustboard
+The File Provider app must be installed and registered in the user's session.
+This formula deploys files; it does not bypass signing, notarization, or system approval.
+Follow docs/MACOS.md for the native app and launchd installation.
+Uninstalling /opt/homebrew/Cellar/rustboard/0.1.0... (11 files, 4.4MB)
+Untapping rustboard/local-acceptance...
+Untapped 1 formula (38 files, 42KB).

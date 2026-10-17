@@ -1,0 +1,1 @@
+Could not switch to audit session 0x186b4: 1: Operation not permitted

@@ -1,0 +1,7 @@
+{
+  "removed_loopback_test_peers": 10,
+  "remaining_peers": 0,
+  "agent_job": "booted out",
+  "peer": "stop requested",
+  "domain": "retained inactive; latest host awaits signature"
+}

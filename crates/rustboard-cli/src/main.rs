@@ -17,6 +17,13 @@ fn main() -> anyhow::Result<()> {
         anyhow::ensure!(value["ok"] == true, "command failed");
         Ok(())
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let value = rustboard_platform::macos::ipc::request(args)?;
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        anyhow::ensure!(value["ok"] == true, "command failed");
+        Ok(())
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     anyhow::bail!("Native IPC backend not installed");
 }

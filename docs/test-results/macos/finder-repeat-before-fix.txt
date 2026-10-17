@@ -1,0 +1,1 @@
+FAIL actual Finder Cmd+V, same 4KiB Offer to finder-repeat: permission error. Source flags included uchg. First-paste hash passed separately.

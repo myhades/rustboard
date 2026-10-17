@@ -1,5 +1,5 @@
 // Diagnostic Unix endpoint from the Core throughput example. Does NOT replace or
-// test signed Agent authentication. Runs the real v1 decoder and hydration writer.
+// test signed Agent authentication. Runs the production decoder and hydration writer.
 import Foundation
 import CryptoKit
 import Darwin
@@ -9,6 +9,7 @@ import Darwin
         let path = CommandLine.arguments[1]
         let destination = URL(fileURLWithPath: CommandLine.arguments[2])
         let oldDecoder = CommandLine.arguments.contains("--generic")
+        let jsonOnly = CommandLine.arguments.contains("--json")
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else {throw WireError.unavailable}
         defer {close(fd)}
@@ -38,10 +39,13 @@ import Darwin
                 var i = 0
                 while i < raw.count {let n = write(fd, raw.baseAddress!.advanced(by: i), raw.count-i); guard n > 0 else {throw WireError.unavailable}; i += n}
             }
+            if !oldDecoder && !jsonOnly {return try readIPCReply(binary: op.type == "read_binary", readExact: readExact)}
             let packet = try readExact(frameLength(readExact(4)))
             let decodeStart = ProcessInfo.processInfo.systemUptime
             defer {decodeSeconds += ProcessInfo.processInfo.systemUptime-decodeStart}
-            return try oldDecoder ? JSONDecoder().decode(Reply.self, from: packet) : decodeReply(packet)
+            var reply = try oldDecoder ? JSONDecoder().decode(Reply.self, from: packet) : decodeReply(packet)
+            reply.binary_data = false
+            return reply
         }
         guard let offer = try call(Operation(type: "get_offer")).offer, let file = offer.content.files?.first, let size = file.size else {throw WireError.invalid}
         try offer.validate()
@@ -54,7 +58,7 @@ import Darwin
         var hash = SHA256()
         while let bytes = try autoreleasepool(invoking: {try handle.read(upToCount: 65536)}), !bytes.isEmpty {hash.update(data: bytes)}
         let digest = hash.finalize().map {String(format: "%02x", $0)}.joined()
-        let report: [String: Any] = ["mode": oldDecoder ? "unix_hydrate_generic" : "unix_hydrate_fast", "bytes": size,
+        let report: [String: Any] = ["mode": oldDecoder ? "unix_hydrate_generic" : (jsonOnly ? "unix_hydrate_json" : "unix_hydrate_negotiated"), "bytes": size,
             "seconds": seconds, "mib_per_second": Double(size)/1048576/seconds,
             "call_seconds": callSeconds, "decode_seconds": decodeSeconds, "sha256": digest]
         print(String(data: try JSONSerialization.data(withJSONObject: report, options: .sortedKeys), encoding: .utf8)!)

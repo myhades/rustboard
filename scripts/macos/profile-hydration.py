@@ -18,6 +18,7 @@ p.add_argument("vectors", type=Path)
 p.add_argument("output", type=Path)
 p.add_argument("--sizes", nargs="+", type=int, default=[4096, 67108864, 1073741824])
 p.add_argument("--generic", action="store_true")
+p.add_argument("--json", action="store_true", help="Force legacy fast JSON despite binary capability")
 args = p.parse_args()
 args.output.mkdir(parents=True, exist_ok=False)
 hashes = {v["size"]: v["sha256"] for v in json.loads(args.vectors.read_text())["hashes"]}
@@ -36,7 +37,7 @@ for size in args.sizes:
                         raise RuntimeError("diagnostic server did not become ready")
                     time.sleep(0.02)
                 with (args.output / f"{size}-client-resources.txt").open("w") as resources:
-                    result = subprocess.run(["/usr/bin/time", "-l", str(args.swift.resolve()), str(sock), str(dest)] + (["--generic"] if args.generic else []), stdout=subprocess.PIPE, stderr=resources, text=True, timeout=300, check=True)
+                    result = subprocess.run(["/usr/bin/time", "-l", str(args.swift.resolve()), str(sock), str(dest)] + (["--generic"] if args.generic else []) + (["--json"] if args.json else []), stdout=subprocess.PIPE, stderr=resources, text=True, timeout=300, check=True)
                 report = json.loads(result.stdout)
                 assert report["sha256"] == hashes[size], report
                 assert dest.stat().st_size == size

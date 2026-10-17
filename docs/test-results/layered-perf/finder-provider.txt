@@ -1,0 +1,7 @@
+Timestamp               Ty Process[PID:TID]
+2026-10-17 11:46:38.474 Df RustboardProvider[2738:480aad] [org.rustboard:provider] fetch_start
+2026-10-17 11:46:38.524 Df RustboardProvider[2738:4808f6] [org.rustboard:provider] fetch_complete bytes=4096
+2026-10-17 11:46:39.110 Df RustboardProvider[2738:480aad] [org.rustboard:provider] fetch_start
+2026-10-17 11:46:41.083 Df RustboardProvider[2738:4808f6] [org.rustboard:provider] fetch_complete bytes=67108864
+2026-10-17 11:46:41.733 Df RustboardProvider[2738:480aad] [org.rustboard:provider] fetch_start
+2026-10-17 11:47:15.855 Df RustboardProvider[2738:4808f6] [org.rustboard:provider] fetch_complete bytes=1073741824

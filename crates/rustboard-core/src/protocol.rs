@@ -20,6 +20,14 @@ pub enum IpcOperation {
         args: Vec<String>,
     },
     GetOffer,
+    ReadBinary {
+        request_id: u64,
+        offer_id: String,
+        file_id: String,
+        version: String,
+        offset: u64,
+        length: u32,
+    },
     Read {
         request_id: u64,
         offer_id: String,
@@ -188,9 +196,12 @@ pub enum ErrorCode {
 }
 
 pub fn write_frame<W: Write, T: Serialize>(writer: &mut W, value: &T) -> Result<()> {
-    let bytes = serde_json::to_vec(value)?;
-    ensure!(bytes.len() <= MAX_FRAME, "frame too large");
-    writer.write_all(&(bytes.len() as u32).to_be_bytes())?;
+    // One write prevents a separate tiny TLS record/TCP packet for the prefix.
+    let mut bytes = vec![0; 4];
+    serde_json::to_writer(&mut bytes, value)?;
+    let length = bytes.len() - 4;
+    ensure!(length <= MAX_FRAME, "frame too large");
+    bytes[..4].copy_from_slice(&(length as u32).to_be_bytes());
     writer.write_all(&bytes)?;
     writer.flush()?;
     Ok(())

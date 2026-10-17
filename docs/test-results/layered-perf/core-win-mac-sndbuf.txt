@@ -1,0 +1,19 @@
+{"bytes":1073741824,"encode_seconds":0.0,"encoded_bytes":0,"mib_s":35.591197061020786,"mode":"core_tls","read_ms_p50":0.009792,"read_ms_p95":0.021375,"read_ms_p99":87.59220900000001,"read_seconds":25.675327727000102,"seconds":28.771159291,"validated":true}
+       28.83 real         4.36 user         0.99 sys
+            12517376  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 947  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                 262  messages sent
+               88472  messages received
+                   0  signals received
+               22216  voluntary context switches
+                 504  involuntary context switches
+         17727129876  instructions retired
+          6511489024  cycles elapsed
+            10518888  peak memory footprint

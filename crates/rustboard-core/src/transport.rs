@@ -14,7 +14,7 @@ use rustls::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    io::Write,
+    io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     path::Path,
     sync::{
@@ -183,7 +183,75 @@ impl ClientCertVerifier for Pins {
 }
 
 pub type Client = StreamOwned<ClientConnection, TcpStream>;
+const ALPN_V1: &[u8] = b"rustboard/1";
+const ALPN_V2: &[u8] = b"rustboard/2";
+// Active sequential reads only. Independent of file size; no work at publication.
+const READ_WINDOW: usize = 4 * 1024 * 1024;
+
+fn write_v2_response<W: Write>(writer: &mut W, message: &Message) -> Result<()> {
+    if let Message::Data {
+        request_id,
+        offset,
+        eof,
+        bytes,
+    } = message
+    {
+        write_binary_data(writer, *request_id, *offset, *eof, bytes)
+    } else {
+        write_frame(writer, message)
+    }
+}
+fn write_binary_data<W: Write>(
+    writer: &mut W,
+    request_id: u64,
+    offset: u64,
+    eof: bool,
+    bytes: &[u8],
+) -> Result<()> {
+    ensure!(bytes.len() <= READ_WINDOW, "data too large");
+    let mut header = [0u8; 21];
+    header[..4].copy_from_slice(&((bytes.len() as u32 + 17) | 0x8000_0000).to_be_bytes());
+    header[4..12].copy_from_slice(&request_id.to_be_bytes());
+    header[12..20].copy_from_slice(&offset.to_be_bytes());
+    header[20] = u8::from(eof);
+    let mut buffered = std::io::BufWriter::with_capacity(MAX_CHUNK, writer);
+    buffered.write_all(&header)?;
+    buffered.write_all(bytes)?;
+    buffered.flush()?;
+    Ok(())
+}
+
+fn read_v2_data<R: Read>(reader: &mut R, limit: usize) -> Result<DataReply> {
+    let mut header = [0u8; 21];
+    reader.read_exact(&mut header[..4])?;
+    let size = u32::from_be_bytes(header[..4].try_into().unwrap());
+    ensure!(size & 0x8000_0000 != 0, "remote read rejected");
+    let size = (size & 0x7fff_ffff) as usize;
+    ensure!(
+        size >= 17 && size - 17 <= limit && size - 17 <= READ_WINDOW,
+        "invalid data length"
+    );
+    reader.read_exact(&mut header[4..])?;
+    ensure!(header[20] <= 1, "invalid EOF");
+    let mut bytes = vec![0; size - 17];
+    reader.read_exact(&mut bytes)?;
+    Ok(DataReply {
+        _kind: DataReplyKind::Data,
+        request_id: u64::from_be_bytes(header[4..12].try_into().unwrap()),
+        offset: u64::from_be_bytes(header[12..20].try_into().unwrap()),
+        eof: header[20] == 1,
+        bytes,
+    })
+}
+
+fn read_response(stream: &mut Client) -> Result<Message> {
+    read_frame(stream)
+}
+
 pub fn connect(identity: &Identity, peer: &Peer) -> Result<Client> {
+    connect_version(identity, peer, false)
+}
+fn connect_version(identity: &Identity, peer: &Peer, legacy: bool) -> Result<Client> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut config = ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&version::TLS13])?
@@ -195,7 +263,11 @@ pub fn connect(identity: &Identity, peer: &Peer) -> Result<Client> {
             vec![CertificateDer::from(identity.cert.clone())],
             identity.key(),
         )?;
-    config.alpn_protocols = vec![b"rustboard/1".to_vec()];
+    config.alpn_protocols = if legacy {
+        vec![ALPN_V1.to_vec()]
+    } else {
+        vec![ALPN_V2.to_vec(), ALPN_V1.to_vec()]
+    };
     let socket = TcpStream::connect_timeout(&peer.address, Duration::from_secs(3))?;
     socket.set_read_timeout(Some(Duration::from_secs(5)))?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -206,14 +278,21 @@ pub fn connect(identity: &Identity, peer: &Peer) -> Result<Client> {
         stream.conn.complete_io(&mut stream.sock)?;
     }
     ensure!(
-        stream.conn.alpn_protocol() == Some(b"rustboard/1"),
+        matches!(stream.conn.alpn_protocol(), Some(ALPN_V1 | ALPN_V2)),
         "ALPN mismatch"
     );
     Ok(stream)
 }
 
 type IpcSourceKey = (String, String, String, String);
-type SharedConnection = Arc<Mutex<Option<Client>>>;
+#[derive(Default)]
+struct ReadConnection {
+    stream: Option<Client>,
+    bytes: Vec<u8>,
+    offset: u64,
+    next: Option<u64>,
+}
+type SharedConnection = Arc<Mutex<ReadConnection>>;
 
 /// Wire-equivalent IPC reply without a serde_json::Value allocation per data byte.
 #[derive(Serialize)]
@@ -237,6 +316,21 @@ pub struct IpcData {
     request_id: u64,
     #[serde(rename = "type")]
     kind: &'static str,
+}
+
+/// Explicitly requested binary IPC data; control/error and legacy replies stay JSON.
+pub fn write_ipc_reply<W: Write>(writer: &mut W, reply: &IpcReply, binary: bool) -> Result<()> {
+    if binary && let IpcReply::Data { response, .. } = reply {
+        write_binary_data(
+            writer,
+            response.request_id,
+            response.offset,
+            response.eof,
+            &response.bytes,
+        )
+    } else {
+        write_frame(writer, reply)
+    }
 }
 
 pub struct Node {
@@ -263,10 +357,18 @@ impl Node {
                 engine.expire();
                 ensure!(!engine.paused, "paused");
                 Ok(IpcReply::Other(
-                    serde_json::json!({"ok":true,"protocol":1,"offer":engine.current}),
+                    serde_json::json!({"ok":true,"protocol":1,"offer":engine.current,"binary_data":true}),
                 ))
             }
-            IpcOperation::Read {
+            IpcOperation::ReadBinary {
+                request_id,
+                offer_id,
+                file_id,
+                version,
+                offset,
+                length,
+            }
+            | IpcOperation::Read {
                 request_id,
                 offer_id,
                 file_id,
@@ -325,7 +427,7 @@ impl Node {
                             if cache.len() >= 2 {
                                 cache.remove(0);
                             }
-                            let connection = Arc::new(Mutex::new(None));
+                            let connection = Arc::new(Mutex::new(ReadConnection::default()));
                             cache.push((key, connection.clone()));
                             connection
                         }
@@ -446,15 +548,16 @@ impl Node {
                     vec![CertificateDer::from(self.identity.cert.clone())],
                     self.identity.key(),
                 )?;
-        config.alpn_protocols = vec![b"rustboard/1".to_vec()];
+        config.alpn_protocols = vec![ALPN_V2.to_vec(), ALPN_V1.to_vec()];
         let mut stream = StreamOwned::new(ServerConnection::new(Arc::new(config))?, socket);
         while stream.conn.is_handshaking() {
             stream.conn.complete_io(&mut stream.sock)?;
         }
         ensure!(
-            stream.conn.alpn_protocol() == Some(b"rustboard/1"),
+            matches!(stream.conn.alpn_protocol(), Some(ALPN_V1 | ALPN_V2)),
             "ALPN mismatch"
         );
+        let binary = stream.conn.alpn_protocol() == Some(ALPN_V2);
         let cert = &stream
             .conn
             .peer_certificates()
@@ -527,11 +630,35 @@ impl Node {
                     match source {
                         Ok(source)
                             if length > 0
-                                && length as usize <= MAX_CHUNK
+                                && length as usize
+                                    <= if binary { READ_WINDOW } else { MAX_CHUNK }
                                 && offset <= source.len() =>
                         {
                             let mut bytes = vec![0; length as usize];
-                            match source.read_at(offset, &mut bytes) {
+                            let read = (|| -> Result<usize> {
+                                let mut total = 0;
+                                while total < bytes.len() && offset + (total as u64) < source.len()
+                                {
+                                    ensure!(
+                                        self.trusted(&pin) && !self.stop.load(Ordering::Acquire),
+                                        "revoked"
+                                    );
+                                    // Revalidate authority and source version between bounded reads.
+                                    self.engine.lock().unwrap().source(
+                                        &source_device,
+                                        &offer_id,
+                                        &file_id,
+                                        &version,
+                                    )?;
+                                    let end = (total + MAX_CHUNK).min(bytes.len());
+                                    let n = source
+                                        .read_at(offset + total as u64, &mut bytes[total..end])?;
+                                    ensure!(n > 0, "unexpected EOF");
+                                    total += n;
+                                }
+                                Ok(total)
+                            })();
+                            match read {
                                 Ok(n) => {
                                     bytes.truncate(n);
                                     Message::Data {
@@ -560,7 +687,11 @@ impl Node {
                     code: ErrorCode::InvalidRequest,
                 },
             };
-            write_frame(&mut stream, &response)?;
+            if binary {
+                write_v2_response(&mut stream, &response)?;
+            } else {
+                write_frame(&mut stream, &response)?;
+            }
         }
         Ok(())
     }
@@ -577,10 +708,10 @@ impl Node {
         };
         if let Some(offer) = offer {
             write_frame(&mut stream, &Message::Offer { offer })?;
-            let _: Message = read_frame(&mut stream)?;
+            let _: Message = read_response(&mut stream)?;
         }
         write_frame(&mut stream, &Message::Poll)?;
-        if let Message::Offer { offer } = read_frame(&mut stream)? {
+        if let Message::Offer { offer } = read_response(&mut stream)? {
             self.accept(offer, peer.clone())?;
         }
         Ok(())
@@ -616,7 +747,7 @@ impl RemoteSource {
             peer,
             offer,
             file,
-            connection: Arc::new(Mutex::new(None)),
+            connection: Arc::new(Mutex::new(ReadConnection::default())),
         }
     }
 }
@@ -641,11 +772,35 @@ impl ReadAt for RemoteSource {
             return Ok(0);
         }
         let mut connection = self.connection.lock().unwrap();
-        if connection.is_none() {
-            *connection = Some(connect(&self.node.identity, &self.peer)?);
-        }
         let result = (|| {
-            let stream = connection.as_mut().unwrap();
+            let current = self.node.engine.lock().unwrap().current.clone();
+            ensure!(
+                current
+                    .as_ref()
+                    .is_some_and(|o| o.offer_id == self.offer.offer_id
+                        && o.source_device == self.offer.source_device),
+                "offer replaced"
+            );
+            let available = offset
+                .checked_sub(connection.offset)
+                .and_then(|n| usize::try_from(n).ok());
+            if let Some(start) = available.filter(|start| *start < connection.bytes.len()) {
+                let n = buffer.len().min(connection.bytes.len() - start);
+                buffer[..n].copy_from_slice(&connection.bytes[start..start + n]);
+                connection.next = Some(offset + n as u64);
+                return Ok(n);
+            }
+            if connection.stream.is_none() {
+                connection.stream = Some(connect(&self.node.identity, &self.peer)?);
+            }
+            let binary = connection.stream.as_ref().unwrap().conn.alpn_protocol() == Some(ALPN_V2);
+            let length = if binary && connection.next == Some(offset) && buffer.len() == MAX_CHUNK {
+                (self.len() - offset).min(READ_WINDOW as u64) as usize
+            } else {
+                buffer.len()
+            };
+            connection.bytes.clear();
+            let stream = connection.stream.as_mut().unwrap();
             write_frame(
                 stream,
                 &Message::Read {
@@ -655,13 +810,18 @@ impl ReadAt for RemoteSource {
                     file_id: self.file.file_id.clone(),
                     version: self.file.version.clone(),
                     offset,
-                    length: buffer.len() as u32,
+                    length: length as u32,
                 },
             )?;
             // A read can only succeed with Data. Decode directly into the typed
             // payload, avoiding serde's internally-tagged enum Content buffer
             // (one intermediate value per byte of the JSON array).
-            match read_frame::<_, DataReply>(stream)? {
+            let reply = if binary {
+                read_v2_data(stream, length)?
+            } else {
+                read_frame::<_, DataReply>(stream)?
+            };
+            match reply {
                 DataReply {
                     request_id: 1,
                     offset: returned,
@@ -669,7 +829,7 @@ impl ReadAt for RemoteSource {
                     eof,
                     ..
                 } if returned == offset
-                    && bytes.len() <= buffer.len()
+                    && bytes.len() <= length
                     && offset + bytes.len() as u64 <= self.len() =>
                 {
                     ensure!(!bytes.is_empty() || eof, "empty non-EOF response");
@@ -677,14 +837,18 @@ impl ReadAt for RemoteSource {
                         eof == (offset + bytes.len() as u64 == self.len()),
                         "inconsistent EOF"
                     );
-                    buffer[..bytes.len()].copy_from_slice(&bytes);
-                    Ok(bytes.len())
+                    let n = bytes.len().min(buffer.len());
+                    buffer[..n].copy_from_slice(&bytes[..n]);
+                    connection.offset = offset;
+                    connection.bytes = if bytes.len() > n { bytes } else { Vec::new() };
+                    connection.next = Some(offset + n as u64);
+                    Ok(n)
                 }
                 _ => anyhow::bail!("remote read rejected"),
             }
         })();
         if result.is_err() {
-            *connection = None;
+            *connection = ReadConnection::default();
         }
         result
     }
@@ -710,6 +874,111 @@ enum DataReplyKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn binary_frame_bounds_and_truncation() {
+        let message = Message::Data {
+            request_id: u64::MAX,
+            offset: 9007199254740993,
+            eof: true,
+            bytes: vec![255; MAX_CHUNK],
+        };
+        let mut encoded = Vec::new();
+        write_v2_response(&mut encoded, &message).unwrap();
+        let reply = read_v2_data(&mut &encoded[..], MAX_CHUNK).unwrap();
+        assert_eq!(reply.request_id, u64::MAX);
+        assert_eq!(reply.offset, 9007199254740993);
+        assert!(reply.eof);
+        assert_eq!(reply.bytes, vec![255; MAX_CHUNK]);
+        assert!(read_v2_data(&mut &encoded[..], MAX_CHUNK - 1).is_err());
+        for n in [0, 3, 4, 20, encoded.len() - 1] {
+            assert!(read_v2_data(&mut &encoded[..n], MAX_CHUNK).is_err());
+        }
+        encoded[20] = 2;
+        assert!(read_v2_data(&mut &encoded[..], MAX_CHUNK).is_err());
+        assert!(read_v2_data(&mut &u32::MAX.to_be_bytes()[..], READ_WINDOW).is_err());
+    }
+
+    #[test]
+    fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
+        let a = Node::new(Identity::generate().unwrap(), vec![]);
+        let b = Node::new(Identity::generate().unwrap(), vec![]);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let peer = Peer {
+            address: listener.local_addr().unwrap(),
+            fingerprint: a.identity.pin(),
+        };
+        a.peers.lock().unwrap().push(Peer {
+            address: peer.address,
+            fingerprint: b.identity.pin(),
+        });
+        b.peers.lock().unwrap().push(peer.clone());
+        let source = Arc::new(PatternSource::new(READ_WINDOW as u64 * 3));
+        let id = engine::new_id();
+        let file = FileEntry {
+            file_id: id.clone(),
+            relative_path: "test.bin".into(),
+            size: Some(source.len()),
+            version: "v1".into(),
+            media_type: "application/octet-stream".into(),
+        };
+        let offer = a
+            .engine
+            .lock()
+            .unwrap()
+            .local(
+                Content::Files {
+                    files: vec![file.clone()],
+                },
+                std::collections::HashMap::from([(id, source.clone() as Arc<dyn ReadAt>)]),
+            )
+            .unwrap();
+        let server = a.serve(listener).unwrap();
+        b.sync_once(&peer).unwrap();
+        assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
+        // Old clients negotiate v1 with a new server and retain the exact JSON frame.
+        let mut legacy = connect_version(&b.identity, &peer, true).unwrap();
+        assert_eq!(legacy.conn.alpn_protocol(), Some(ALPN_V1));
+        write_frame(
+            &mut legacy,
+            &Message::Read {
+                request_id: 3,
+                source_device: offer.source_device.clone(),
+                offer_id: offer.offer_id.clone(),
+                file_id: file.file_id.clone(),
+                version: file.version.clone(),
+                offset: 0,
+                length: 1,
+            },
+        )
+        .unwrap();
+        let reply: DataReply = read_frame(&mut legacy).unwrap();
+        assert_eq!(reply.bytes, [0]);
+        let remote = RemoteSource::new(b.clone(), peer, offer, file);
+        remote.read_at(0, &mut [0; 4096]).unwrap();
+        assert_eq!(source.bytes_read.load(Ordering::Relaxed), 4097);
+        let mut bytes = vec![0; MAX_CHUNK];
+        remote.read_at(4096, &mut bytes).unwrap();
+        assert_eq!(
+            source.bytes_read.load(Ordering::Relaxed),
+            4097 + READ_WINDOW as u64
+        );
+        remote.read_at(4096 + MAX_CHUNK as u64, &mut bytes).unwrap();
+        assert_eq!(bytes[0], ((4096 + MAX_CHUNK) % 251) as u8);
+        assert_eq!(
+            source.bytes_read.load(Ordering::Relaxed),
+            4097 + READ_WINDOW as u64
+        );
+        assert!(remote.connection.lock().unwrap().bytes.len() <= READ_WINDOW);
+        b.engine.lock().unwrap().withdraw();
+        assert!(
+            remote
+                .read_at(4096 + 2 * MAX_CHUNK as u64, &mut bytes)
+                .is_err()
+        );
+        assert!(remote.connection.lock().unwrap().bytes.is_empty());
+        a.stop.store(true, Ordering::Release);
+        server.join().unwrap();
+    }
     #[test]
     fn typed_ipc_reply_is_byte_identical_to_original_value() {
         for bytes in [vec![], (0..=255).collect(), vec![251; MAX_CHUNK]] {

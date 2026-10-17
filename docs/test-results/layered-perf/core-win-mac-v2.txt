@@ -1,0 +1,21 @@
+   Compiling rustboard-core v0.1.0 (/Users/myhades/Documents/GitHub/rustboard/test-output/layered-perf/repo/crates/rustboard-core)
+    Finished `release` profile [optimized] target(s) in 1.18s
+{"bytes":1073741824,"encode_seconds":0.0,"encoded_bytes":0,"mib_s":36.32421273585193,"mode":"core_tls","read_ms_p50":0.009833,"read_ms_p95":0.021375,"read_ms_p99":91.12762500000001,"read_seconds":25.15103257200008,"seconds":28.190562792,"validated":true}
+       28.54 real         4.29 user         0.99 sys
+            12500992  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                 947  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                 262  messages sent
+               86797  messages received
+                   0  signals received
+               22189  voluntary context switches
+                 509  involuntary context switches
+         17716520758  instructions retired
+          6522225726  cycles elapsed
+            10502504  peak memory footprint

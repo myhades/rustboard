@@ -1,0 +1,47 @@
+[
+  {
+    "transfer": {
+      "bytes": 4096,
+      "content_verified": true,
+      "mib_per_second": 0.08162798327423032,
+      "mode": "windows_tls_istream_disk",
+      "publication_reads": 0,
+      "seconds": 0.0478543,
+      "source_bytes": 4096
+    },
+    "sha256": "d67c656e01756650d77717b0839985a056ec28ffe174601d690fc407a2ceffca",
+    "sampled_peak_rss_bytes": 12587008,
+    "sampled_cpu_seconds": 0.046875,
+    "sample_interval_ms": 50
+  },
+  {
+    "transfer": {
+      "bytes": 67108864,
+      "content_verified": true,
+      "mib_per_second": 262.4710666660105,
+      "mode": "windows_tls_istream_disk",
+      "publication_reads": 0,
+      "seconds": 0.2438364,
+      "source_bytes": 67108864
+    },
+    "sha256": "98dc891b284e4d84ac25b0c0a24fdbe39a7f0dbd643ad5e8aa06e02fc6258254",
+    "sampled_peak_rss_bytes": 22474752,
+    "sampled_cpu_seconds": 0.1875,
+    "sample_interval_ms": 50
+  },
+  {
+    "transfer": {
+      "bytes": 1073741824,
+      "content_verified": true,
+      "mib_per_second": 302.9042363523893,
+      "mode": "windows_tls_istream_disk",
+      "publication_reads": 0,
+      "seconds": 3.3806064,
+      "source_bytes": 1073741824
+    },
+    "sha256": "9cc5601236c455c6af19a76e64d2d95953a93b10eeb8b8b756a57090e1499b3e",
+    "sampled_peak_rss_bytes": 25067520,
+    "sampled_cpu_seconds": 3.171875,
+    "sample_interval_ms": 50
+  }
+]

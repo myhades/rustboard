@@ -1,5 +1,7 @@
 # 下一轮专项性能目标
 
+专项工作已开始：分层实测与修复见 [PERFORMANCE_LAYERED.md](PERFORMANCE_LAYERED.md)，新增传输契约见 [TRANSPORT_V2.md](TRANSPORT_V2.md)。下文保留本轮启动前的目标与历史边界；不得将历史“待签名/待互通”状态当作当前状态。
+
 2026-10-17：本轮定位、修复和证据整理收尾；以下是后续目标，不是已达成的性能承诺。
 当前实现和验收边界见 [PERFORMANCE_FIX.md](PERFORMANCE_FIX.md)。
 

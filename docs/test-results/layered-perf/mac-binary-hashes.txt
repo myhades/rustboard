@@ -1,0 +1,2 @@
+404c9b3015c2a8f57ce3bf9b2f4f94fde1a40b6dd26da95afbd14d6e2a4f3feb  /Users/myhades/Documents/GitHub/rustboard/test-output/layered-perf/repo/target/macos/bin/rustboardd
+8738dc38e3db2ab0bfcab3af1aaa014953643d69e7ec6bdafaf0fb0b880ee9c4  /Users/myhades/Documents/GitHub/rustboard/test-output/layered-perf/repo/target/macos/Rustboard.app/Contents/PlugIns/RustboardProvider.appex/Contents/MacOS/RustboardProvider

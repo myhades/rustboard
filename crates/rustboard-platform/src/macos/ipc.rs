@@ -148,6 +148,7 @@ impl Server {
                         authenticate(&stream, false)?;
                         while !node.stop.load(Ordering::Acquire) {
                             let req: IpcRequest = read_frame(&mut stream)?;
+                            let binary = matches!(req.request, IpcOperation::ReadBinary { .. });
                             let reply = (|| -> Result<IpcReply> {
                                 ensure!(req.protocol == 1, "unsupported protocol");
                                 match req.request {
@@ -158,7 +159,11 @@ impl Server {
                                 eprintln!("IPC request failed: {error:#}");
                                 IpcReply::Other(serde_json::json!({"ok":false,"protocol":1,"code":"io","error":"request failed"}))
                             });
-                            write_frame(&mut stream, &reply)?;
+                            rustboard_core::transport::write_ipc_reply(
+                                &mut stream,
+                                &reply,
+                                binary,
+                            )?;
                         }
                         Ok(())
                     };

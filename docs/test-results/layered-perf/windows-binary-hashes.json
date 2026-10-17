@@ -1,0 +1,12 @@
+[
+  {
+    "Algorithm": "SHA256",
+    "Hash": "CDE3B91240AC355A3F69E2680763E766779D492D2715DC7F4BF61D3CB6EDEC62",
+    "Path": "D:\\Users\\myhades\\Documents\\GitHub\\Rustboard\\target\\release\\rustboardd.exe"
+  },
+  {
+    "Algorithm": "SHA256",
+    "Hash": "B4E05D0D0D6C0FB8F3AF77B84A8133DD9DC30634FB3411E236FB1CEB849A938D",
+    "Path": "D:\\Users\\myhades\\Documents\\GitHub\\Rustboard\\test-output\\layered-perf\\windows-build\\release\\rustboardd.exe"
+  }
+]

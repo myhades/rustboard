@@ -1,5 +1,12 @@
 # Rustboard 续开发记录 — 2026-10-17
 
+## 专项性能最新状态（优先于以下历史记录）
+
+2026-10-17：二进制 TLS v2 + 有界 4 MiB 顺序窗口 + 协商二进制本地 IPC 已完成双机原生测试。Mac→Windows Explorer 三文件 26.716 s（旧 Agent 217.532 s）；Windows→Mac Finder 两轮 39.625/39.374 s，所有哈希一致。原生证明与探针分开记录于 docs/PERFORMANCE_LAYERED.md，协议在 docs/TRANSPORT_V2.md。400 Mbps 双向目标尚未达到，10G 未验收。
+
+无收益的 socket 缓冲、双连接分窗、1 MiB IPC 批量实验已撤回。Mac 运行版本仍是用户本地签名的 layered-perf/repo/target/macos；未调用个人私钥。Mac 主工作区未覆盖。本次无推送。双端测试配对已撤销，Agent/诊断进程已停止，测试 domain 已删除，原 Mac Provider 注册已恢复；用户可恢复 iPhone 接力。
+
+
 ## macOS 最新交接状态（优先于下方历史阶段）
 
 功能证据已保存，但整体未验收：**性能 FAIL**（1GiB loopback首次fetch383.093秒，约2.67MiB/s），**Windows实体互通 BLOCKED**。M12的哈希PASS不代表速度达标。用户要求将当前实现本地提交，交由主维护者定位共享TLS/IPC及macOS解码瓶颈；本轮没有实施或验证性能修复。后续完整报告见 `docs/MACOS_PROGRESS_REPORT.md`。禁止自行推送远程。

@@ -48,7 +48,7 @@ func itemID(_ offer: Offer, _ file: FileEntry) -> String {
     "rb1:\(offer.source_device):\(offer.offer_id):\(file.file_id):" + SHA256.hash(data: Data(file.version.utf8)).map {String(format: "%02x", $0)}.joined()
 }
 struct DataMessage: Decodable { let type: String; let request_id: UInt64; let offset: UInt64; let bytes: [UInt8]; let eof: Bool }
-struct Reply: Decodable { let ok: Bool; let `protocol`: UInt16; let offer: Offer?; let response: DataMessage? }
+struct Reply: Decodable { let ok: Bool; let `protocol`: UInt16; let offer: Offer?; let response: DataMessage?; var binary_data: Bool? = nil }
 // Fast path for the exact JSON emitted by Node.local_ipc's sorted Value map.
 // Other valid v1 layouts (field order, whitespace, escapes) use JSONDecoder.
 // This is an implementation optimization, not a new encoding or a weaker parser.
@@ -128,6 +128,19 @@ func frameLength(_ bytes: Data) throws -> Int {
     let n = bytes.reduce(UInt32(0)) {($0 << 8) | UInt32($1)}
     guard n > 0, n <= frameLimit else {throw WireError.invalid}; return Int(n)
 }
+// Binary data is accepted only in response to an explicitly negotiated read_binary.
+func readIPCReply(binary: Bool, readExact: (Int) throws -> Data) throws -> Reply {
+    let prefix = try readExact(4)
+    let size = prefix.reduce(UInt32(0)) {($0 << 8) | UInt32($1)}
+    if size & 0x80000000 == 0 { return try decodeReply(readExact(frameLength(prefix))) }
+    let count = Int(size & 0x7fffffff)
+    guard binary, count >= 17, count <= 65536 + 17 else {throw WireError.invalid}
+    let data = try readExact(count)
+    guard data.count == count, data[16] <= 1 else {throw WireError.invalid}
+    let request = data.prefix(8).reduce(UInt64(0)) {($0 << 8) | UInt64($1)}
+    let offset = data[8..<16].reduce(UInt64(0)) {($0 << 8) | UInt64($1)}
+    return Reply(ok:true, protocol:1, offer:nil, response:DataMessage(type:"data", request_id:request, offset:offset, bytes:Array(data.dropFirst(17)), eof:data[16] == 1))
+}
 func ipc(_ operation: Operation) throws -> Reply {try ipc(operation, profile: ProcessInfo.processInfo.environment["RUSTBOARD_PROFILE"] ?? "default")}
 func ipc(_ operation: Operation, profile: String) throws -> Reply {
     try IPCSession(profile: profile).call(operation)
@@ -170,7 +183,7 @@ final class IPCSession {
             while offset < count {let n = read(fd, raw.baseAddress!.advanced(by: offset), count-offset); guard n > 0 else {throw WireError.unavailable}; offset += n}
         }; return result
     }
-    let reply = try decodeReply(readExact(frameLength(readExact(4))))
+    let reply = try readIPCReply(binary: operation.type == "read_binary", readExact: readExact)
     guard reply.ok, reply.protocol == 1 else {throw SecurityFailure.stage("ipc_reply_" + operation.type, 0)}; return reply
     }
 }
@@ -190,9 +203,11 @@ func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
     defer {close(fd); if !success {unlink(url.path)} }
     guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {throw SecurityFailure.stage("hydrate_lock", errno)}
     let requestID = UInt64.random(in: 1...UInt64.max)
+    var binaryData = false
     func checkCurrent() throws {
         guard !progress.isCancelled else {throw WireError.cancelled}
         let reply = try call(Operation(type: "get_offer"))
+        binaryData = reply.binary_data == true
         guard reply.ok, reply.protocol == 1, let current = reply.offer, current.source_device == offer.source_device, current.offer_id == offer.offer_id,
               current.expires_unix_ms > UInt64(Date().timeIntervalSince1970 * 1000),
               current.content.files?.contains(file) == true else {throw WireError.stale}
@@ -204,7 +219,7 @@ func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
         repeat {
             guard !progress.isCancelled else {throw WireError.cancelled}
             let length = UInt32(min(65536, max(1, size-offset)))
-            let reply = try autoreleasepool { try call(Operation(type: "read", request_id: requestID, offer_id: offer.offer_id, file_id: file.file_id, version: file.version, offset: offset, length: length)) }
+            let reply = try autoreleasepool { try call(Operation(type: binaryData ? "read_binary" : "read", request_id: requestID, offer_id: offer.offer_id, file_id: file.file_id, version: file.version, offset: offset, length: length)) }
             guard reply.ok, reply.protocol == 1, let data = reply.response,
                   data.type == "data", data.request_id == requestID, data.offset == offset,
                   data.bytes.count <= Int(length), UInt64(data.bytes.count) <= size-offset,

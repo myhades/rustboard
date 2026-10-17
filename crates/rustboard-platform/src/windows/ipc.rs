@@ -248,9 +248,14 @@ impl Server {
                 continue;
             }
             self.pipe.deadline = Instant::now() + Duration::from_secs(10);
+            let mut binary = false;
             let reply =
                 read_frame::<_, rustboard_core::IpcRequest>(&mut self.pipe).and_then(|request| {
                     ensure!(request.protocol == 1, "unsupported IPC version");
+                    binary = matches!(
+                        request.request,
+                        rustboard_core::IpcOperation::ReadBinary { .. }
+                    );
                     match request.request {
                         rustboard_core::IpcOperation::Control { args } => {
                             self.handle(&node, args).map(IpcReply::Other)
@@ -260,7 +265,7 @@ impl Server {
                 });
             let value = reply
                 .unwrap_or_else(|error| IpcReply::Other(serde_json::json!({"ok":false,"protocol":1,"code":"io","error":error.to_string()})));
-            let _ = write_frame(&mut self.pipe, &value);
+            let _ = rustboard_core::transport::write_ipc_reply(&mut self.pipe, &value, binary);
             // Wait for client to consume response before disconnecting (no blocking FlushFileBuffers).
             let mut dummy = [0u8; 1];
             let _ = self.pipe.read(&mut dummy);

@@ -37,6 +37,14 @@ Installs `~/Applications/Rustboard.app`, binaries in `~/Library/Application Supp
 
 Do not assume a successful SSH foreground test proves launchd network/File Provider permission behavior. Installed-background copy must be tested separately. `doctor` currently confirms reachable Agent/config identity, not complete Finder health.
 
+## macOS file permissions
+
+The installed Agent is a standalone, non-sandboxed executable; the host and File Provider remain sandboxed. File access privacy permissions belong to the installed Agent, not automatically to the visible Rustboard.app. User-approved Files and Folders prompts occurred during acceptance; successful copy did not mean a prompt-free deployment.
+
+For broad file-copy use, the user can grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access. Use + and the file chooser's Cmd+Shift+G to select `~/Library/Application Support/Rustboard/bin/rustboardd`, then enable it. This grants broad read access, including protected app data; it does not make the Agent root or remove File Provider sandbox restrictions. Restart the managed Agent after changing the setting. Do not grant the old scratch-build executable or SSH/Terminal merely to make Rustboard work.
+
+Rustboard cannot silently grant this permission; no installer or script modifies TCC. Full Disk Access has not yet been granted/retested in this acceptance record. Pasteboard, network and File Provider permissions remain separate; report the actual prompt if those still appear.
+
 ## Pair both ends
 
 Read each installed CLI's `doctor` fingerprint and explicitly pair BOTH sides:

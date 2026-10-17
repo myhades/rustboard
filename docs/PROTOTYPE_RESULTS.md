@@ -34,6 +34,10 @@ Explicit synthetic clipboard fixtures: scripts/windows/prototype-clipboard.py, n
 
 Local raw build/install evidence: test-output/prototype/ on Windows; test-output/prototype-0.1.0/ on Mac. Profiles, certificates, pairing files and test data are excluded from packages.
 
+## Permission qualification (user report and TCC log follow-up)
+
+The user manually approved macOS folder-access prompts during acceptance. At 12:40:01 on 2026-10-17, TCC logged SystemPolicyDocumentsFolder prompting for the installed rustboardd; its preceding SystemPolicyAllFiles preflight was denied. Therefore the transfer checks prove operation after manual consent, not prompt-free access to arbitrary folders. Full Disk Access onboarding and subsequent cross-folder testing remain unverified.
+
 ## Limits
 
 No folders/program directories, native inline images, notarization, auto-update, full Homebrew upgrade verification or 10G performance claim. Earlier large-file speed results are in PERFORMANCE_LAYERED.md and were not rerun as a new performance benchmark here. Installed Agent snapshots were approximately 18 MiB Windows working set and 35 MiB Mac RSS; these are idle/small-image observations, not peak memory or CPU benchmarks.

@@ -4,7 +4,7 @@
 
 Windows 正式安装已迁移为 schema-2 config.json，包含 peers 和 DPAPI 加密私钥；原 identity.json / peers.json 已移除，指纹与配对保留。所有配置修改（含 CLI pair/unpair/pause/resume/mode）均需手动重启，返回 restart_required，status/peers 显示运行状态。当前正常同步。
 
-Mac 原安装仍在运行，Keychain 版位于 test-output/credentials-0.1.0/repo，已构建/自动测试，等待用户本地签名后部署验收。未经签名的 SSH Keychain 探针失败 -25308，不能声称原生私钥迁移已经通过。不要访问个人开发者私钥、不要覆盖 Mac 主工作区。详见 docs/CREDENTIAL_STORAGE.md 和 PROTOTYPE_RESULTS.md 最新段落。
+Mac 已由用户本地签名并安装 credentials-0.1.0/repo 版本；schema-2 config 引用登录 Keychain，旧 identity.json / peers.json 已移除，指纹和配对保留。launchd 两次重启读取私钥成功；pause/resume 验证仅重启生效。双向 Unicode TLS 同步及 Windows PNG → Mac File Provider 读取/哈希通过。此前 unsigned SSH 探针 -25308 仅属历史失败，不影响本次签名 Agent 验收。不要访问个人开发者私钥、不要覆盖 Mac 主工作区。详见 docs/CREDENTIAL_STORAGE.md 和 PROTOTYPE_RESULTS.md。
 
 
 ## 0.1.0 prototype 部署（最新，覆盖以下历史运行状态）

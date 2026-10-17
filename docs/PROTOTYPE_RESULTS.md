@@ -4,7 +4,7 @@
 
 Windows installed Agent has migrated to schema-2 single config and current-user DPAPI, retaining its original fingerprint and one peer. Legacy identity.json and peers.json are removed. Tested pending pause remains inactive until restart, then applies; restored normal operation after another restart. Unit tests cover tampering, wrong certificate/key, interrupted migration cleanup, duplicate peers and malformed config. No plaintext identity fallback.
 
-Mac Keychain integration has compiled and passed existing workspace/Swift checks; signed installed-Agent migration is pending user signing of test-output/credentials-0.1.0/repo. An explicit unsigned SSH Keychain probe returned OSStatus -25308 (interaction not allowed); this is not a successful Keychain runtime test. Existing Mac installation remains unchanged. See CREDENTIAL_STORAGE.md for semantics.
+Mac user-signed Agent is now installed under launchd with schema-2 config and login Keychain storage. Original fingerprint and one peer retained; legacy identity.json / peers.json removed. Pause remained inactive before restart and became active after restart; resume plus a second restart restored normal operation. Both restarts successfully loaded the protected identity. Bidirectional native Unicode clipboard TLS passed with both upgraded Agents. Windows PNG fetched through Mac File Provider: 1,365 bytes, SHA-256 1279f986b08e9c1bba06dbd133a9360414a17408b25e57369eef10dff37fb096. This fetch is not a new Finder GUI acceptance. Earlier unsigned SSH Keychain probe failure -25308 remains historical failed evidence. See CREDENTIAL_STORAGE.md.
 
 The image/file and package results below refer to the earlier prototype installation, before this credential migration.
 

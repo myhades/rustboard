@@ -65,6 +65,23 @@ impl Identity {
         file.sync_all()?;
         Ok(identity)
     }
+    /// Platform credential stores supply PKCS#8 material; validate its certificate binding.
+    pub fn from_parts(cert: Vec<u8>, key: Vec<u8>) -> Result<Self> {
+        let identity = Self { cert, key };
+        rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_protocol_versions(&[&version::TLS13])?
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![CertificateDer::from(identity.cert.clone())],
+            identity.key(),
+        )?;
+        Ok(identity)
+    }
+    pub fn private_key_der(&self) -> &[u8] {
+        &self.key
+    }
     pub fn pin(&self) -> String {
         fingerprint(&self.cert)
     }

@@ -323,17 +323,7 @@ pub fn run() -> anyhow::Result<()> {
     let images = dir.join("images");
     crate::image_file::prepare(&images)?;
     STATE.with_borrow_mut(|s| s.images = images);
-    let identity = rustboard_core::transport::Identity::load(&dir)?;
-    let peers_path = dir.join("peers.json");
-    let peers: Vec<rustboard_core::transport::Peer> = if peers_path.exists() {
-        serde_json::from_slice(&std::fs::read(peers_path)?)?
-    } else {
-        vec![]
-    };
-    anyhow::ensure!(peers.len() <= 16, "too many peers");
-    for peer in &peers {
-        rustboard_core::transport::device_from_pin(&peer.fingerprint)?;
-    }
+    let (identity, peers) = crate::config::startup(&dir)?;
     let node = rustboard_core::transport::Node::new(identity, peers);
     node.engine
         .lock()

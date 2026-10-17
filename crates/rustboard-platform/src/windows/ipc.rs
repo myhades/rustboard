@@ -1,7 +1,7 @@
 use anyhow::{Result, ensure};
 use rustboard_core::{
     read_frame,
-    transport::{IpcReply, Node, Peer, device_from_pin},
+    transport::{IpcReply, Node},
     write_frame,
 };
 use std::{
@@ -289,72 +289,12 @@ impl Server {
             "peers" => {
                 return Ok(serde_json::json!({"ok":true,"peers":*node.peers.lock().unwrap()}));
             }
-            "pause" => {
-                let mut e = node.engine.lock().unwrap();
-                e.paused = true;
-                e.withdraw();
-                *node.incoming.lock().unwrap() = None;
-            }
-            "resume" => node.engine.lock().unwrap().paused = false,
-            "mode" => {
-                ensure!(
-                    args.len() == 2 && ["text", "all"].contains(&args[1].as_str()),
-                    "mode text|all"
-                );
-                let mut e = node.engine.lock().unwrap();
-                e.text_only = args[1] == "text";
-                if e.text_only
-                    && e.current
-                        .as_ref()
-                        .is_some_and(|o| matches!(o.content, rustboard_core::Content::Files { .. }))
-                {
-                    e.withdraw();
-                }
-            }
-            "pair" => {
-                ensure!(
-                    args.len() == 4 && args[2] == "--fingerprint",
-                    "pair <IP:port> --fingerprint <64 hex chars copied from peer doctor>; configure BOTH peers"
-                );
-                let pin = args[3].to_lowercase();
-                device_from_pin(&pin)?;
-                ensure!(pin != node.identity.pin(), "cannot pair self");
-                let address = args[1].parse()?;
-                let mut peers = node.peers.lock().unwrap();
-                ensure!(
-                    peers.len() < 16 || peers.iter().any(|p| p.fingerprint == pin),
-                    "peer limit reached"
-                );
-                let mut next = peers.clone();
-                next.retain(|p| p.fingerprint != pin);
-                next.push(Peer {
-                    address,
-                    fingerprint: pin,
-                });
-                self.save_peers(&next)?;
-                *peers = next;
-            }
-            "unpair" => {
-                ensure!(args.len() == 2, "unpair <device_id or fingerprint>");
-                let mut peers = node.peers.lock().unwrap();
-                let mut next = peers.clone();
-                next.retain(|p| p.device() != args[1] && p.fingerprint != args[1]);
-                self.save_peers(&next)?;
-                *peers = next;
+            "pause" | "resume" | "mode" | "pair" | "unpair" => {
+                return crate::config::update(&self.dir, &node.identity.pin(), &args);
             }
             "stop" => node.stop.store(true, Ordering::Release),
             _ => anyhow::bail!("unknown command"),
         }
-        if ["pause", "resume", "mode"].contains(&args[0].as_str()) {
-            crate::config::save_state(&self.dir, &node.engine.lock().unwrap())?;
-        }
         Ok(serde_json::json!({"ok":true}))
-    }
-    fn save_peers(&self, peers: &[Peer]) -> Result<()> {
-        let path = self.dir.join("peers.json");
-        let temporary = self.dir.join("peers.new");
-        std::fs::write(&temporary, serde_json::to_vec_pretty(peers)?)?;
-        std::fs::rename(temporary, path)?;
-        Ok(())
     }
 }

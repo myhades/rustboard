@@ -1,10 +1,7 @@
 pub mod ipc;
 pub mod local_files;
 use anyhow::{Result, ensure};
-use rustboard_core::{
-    Content,
-    transport::{Identity, Node},
-};
+use rustboard_core::{Content, transport::Node};
 use std::{
     ffi::{CStr, CString},
     path::PathBuf,
@@ -143,12 +140,8 @@ pub fn run() -> Result<()> {
             std::fs::remove_file(entry.path())?;
         }
     }
-    let peers = if dir.join("peers.json").exists() {
-        serde_json::from_slice(&std::fs::read(dir.join("peers.json"))?)?
-    } else {
-        Vec::new()
-    };
-    let node = Node::new(Identity::load(&dir)?, peers);
+    let (identity, peers) = crate::config::startup(&dir)?;
+    let node = Node::new(identity, peers);
     node.engine
         .lock()
         .unwrap()
@@ -282,3 +275,5 @@ pub fn run() -> Result<()> {
     let _ = host_command(&["revoke"]);
     Ok(())
 }
+
+pub(crate) mod credential;

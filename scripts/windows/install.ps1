@@ -36,7 +36,7 @@ try {
     if (Test-Path -LiteralPath $configPath) { $config=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
     if ($Listen) {$config.listen=$Listen}
     if (!$config.listen) {throw 'First install requires -Listen <LAN-IP:port>'}
-    [IO.File]::WriteAllText($configPath,($config | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($configPath,($config | ConvertTo-Json -Depth 16),[Text.UTF8Encoding]::new($false))
     & (Join-Path $PSScriptRoot 'autostart.ps1') -Action Install -Agent $agent
     Start-Process -FilePath $agent -WindowStyle Hidden -RedirectStandardOutput (Join-Path $base 'agent.out.log') -RedirectStandardError (Join-Path $base 'agent.err.log') | Out-Null
     for ($i=0; $i -lt 50; $i++) {

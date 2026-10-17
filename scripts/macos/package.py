@@ -11,9 +11,9 @@ if 'TeamIdentifier=not set' in info or 'TeamIdentifier=' not in info:raise Syste
 archive=out/'rustboard-0.1.0-prototype-macos.tar.gz'
 with tarfile.open(archive,'w:gz') as tar:
     for name in ['bin','Rustboard.app']:tar.add(out/name,arcname=name)
-    for name in ['install.sh','uninstall.sh','launchd.py']:tar.add(root/'scripts/macos'/name,arcname='scripts/macos/'+name)
+    for name in ['install.sh','uninstall.sh','launchd.py','restart.sh']:tar.add(root/'scripts/macos'/name,arcname='scripts/macos/'+name)
     tar.add(root/'LICENSE',arcname='LICENSE')
-    for name in ['PROTOTYPE_0_1_0.md','PROTOTYPE_RESULTS.md']:tar.add(root/'docs'/name,arcname='docs/'+name)
+    for name in ['PROTOTYPE_0_1_0.md','PROTOTYPE_RESULTS.md','CREDENTIAL_STORAGE.md']:tar.add(root/'docs'/name,arcname='docs/'+name)
 hasher=hashlib.sha256()
 with archive.open('rb') as stream:
     for block in iter(lambda: stream.read(1024*1024), b''):hasher.update(block)

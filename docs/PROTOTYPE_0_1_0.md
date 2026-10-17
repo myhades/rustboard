@@ -47,7 +47,7 @@ Rustboard cannot silently grant this permission; no installer or script modifies
 
 ## Pair both ends
 
-Read each installed CLI's `doctor` fingerprint and explicitly pair BOTH sides:
+Read each installed CLI's `doctor` fingerprint and explicitly pair BOTH sides, then manually restart BOTH Agents:
 
 ```text
 rustboard pair <other-LAN-IP:port> --fingerprint <other-full-SHA256>
@@ -61,7 +61,7 @@ Do not use test profile identities. Pairing remains after restart. To change a p
 Windows default profile: `%LOCALAPPDATA%/Rustboard/default/`.
 Mac default profile: signed App Group container's `default/` directory, normally `~/Library/Group Containers/<TEAM>.org.rustboard.shared/default/`.
 
-`config.json`:
+Runtime fields in `config.json` (the full generated schema-2 file also contains `schema`, `peers`, and the managed `identity` block; do not replace the full file with this excerpt):
 
 ```json
 {"listen":"192.168.100.6:45451","mode":"all","paused":false}
@@ -69,9 +69,20 @@ Mac default profile: signed App Group container's `default/` directory, normally
 
 Use the machine's own address/port. CLI `--listen` on the Agent overrides the file for that run. Updating listen requires restarting the Agent; rerunning the installer updates installation and startup. A missing address causes bind/start failure rather than silently listening on every interface.
 
-`rustboard pause`, `resume`, `mode text`, `mode all` persist across restart. `pause` is appropriate for temporarily suspending a login-managed Agent. On macOS, `stop` can be restarted by launchd KeepAlive; use `launchctl bootout gui/$(id -u)/org.rustboard.agent` to stop the managed service, or uninstall it.
+All config changes, including CLI `pair`, `unpair`, `pause`, `resume` and `mode`, are saved only and return `restart_required: true`. They do not alter the running Agent or existing connections. `status`/`peers` show ACTIVE state; inspect config for desired state. Manually restart after editing:
 
-Identity/private keys and `peers.json` live in the same private profile directory. Do not distribute them in packages. Removing binaries does not remove this data.
+- Windows: `./scripts/windows/restart.ps1` from the package.
+- Mac: `bash scripts/macos/restart.sh` from the package, or `launchctl kickstart -k gui/$(id -u)/org.rustboard.agent`.
+
+To revoke a peer or pause immediately, stop/restart the Agent after saving; saving alone does not disconnect it. On Mac, `stop` may be restarted by launchd KeepAlive; use `launchctl bootout gui/$(id -u)/org.rustboard.agent` to keep it stopped.
+
+The profile now has ONE editable `config.json` (schema 2), containing `listen`, `mode`, `paused`, `peers` and `identity`. `peers` is an array of `{ "address": "IP:port", "fingerprint": "64 lowercase SHA-256 hex characters" }`. `identity.certificate_der` contains the public certificate bytes. Keep the automatically managed `identity` section intact.
+
+Windows: `identity.private_key` contains `provider: "windows-dpapi"` and an opaque `blob` byte array, encrypted with current-user DPAPI (not machine-wide scope). macOS: it contains `provider: "macos-keychain"` and `account`, referencing the non-synchronizing login Keychain item under service `org.rustboard.device-identity`. The Agent's signed identity controls Keychain access; this is independent of the developer's signing key. No custom cryptography is implemented. DPAPI is a current-user boundary, not protection against arbitrary malicious code already running as that user.
+
+First startup migrates the old identity and peers without changing the certificate fingerprint. It validates the protected key/certificate pair before atomically committing config, then removes the old `identity.json` and `peers.json`. Storage failure aborts startup without silently generating a replacement identity or falling back to plaintext. Removal does not securely erase SSD blocks, prior backups or old test profiles. Do not run an older Agent against a migrated profile.
+
+A config copy alone is not a portable identity backup: Windows DPAPI recovery needs the corresponding Windows credentials/environment, and Mac needs its Keychain item. Missing/locked credentials cause startup failure; unlock the login Keychain and retry, or explicitly establish a new identity and re-pair. Uninstall retains config and Keychain identity. `clock.json`, locks, sockets and temporary data are runtime state, not additional user configuration.
 
 Windows logs: `%LOCALAPPDATA%/Rustboard/agent.err.log` for installer-started process. macOS logs: `~/Library/Application Support/Rustboard/agent.err.log`; File Provider stages also appear in unified logging under `org.rustboard`. Windows login Run currently has no redirected console log; use CLI status and a manual diagnostic run when troubleshooting.
 

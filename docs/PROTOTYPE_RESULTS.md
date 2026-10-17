@@ -1,5 +1,14 @@
 # Rustboard 0.1.0 prototype acceptance
 
+## Credential/config follow-up (latest)
+
+Windows installed Agent has migrated to schema-2 single config and current-user DPAPI, retaining its original fingerprint and one peer. Legacy identity.json and peers.json are removed. Tested pending pause remains inactive until restart, then applies; restored normal operation after another restart. Unit tests cover tampering, wrong certificate/key, interrupted migration cleanup, duplicate peers and malformed config. No plaintext identity fallback.
+
+Mac Keychain integration has compiled and passed existing workspace/Swift checks; signed installed-Agent migration is pending user signing of test-output/credentials-0.1.0/repo. An explicit unsigned SSH Keychain probe returned OSStatus -25308 (interaction not allowed); this is not a successful Keychain runtime test. Existing Mac installation remains unchanged. See CREDENTIAL_STORAGE.md for semantics.
+
+The image/file and package results below refer to the earlier prototype installation, before this credential migration.
+
+
 Date: 2026-10-17. Windows x64 and macOS arm64, same LAN. Evidence below applies to the installed current-user prototype builds, not to an SSH-foreground test Agent. No public release or push was performed.
 
 ## Implementation scope

@@ -1,5 +1,12 @@
 # Rustboard 续开发记录 — 2026-10-17
 
+## 单配置与系统私钥存储（最新）
+
+Windows 正式安装已迁移为 schema-2 config.json，包含 peers 和 DPAPI 加密私钥；原 identity.json / peers.json 已移除，指纹与配对保留。所有配置修改（含 CLI pair/unpair/pause/resume/mode）均需手动重启，返回 restart_required，status/peers 显示运行状态。当前正常同步。
+
+Mac 原安装仍在运行，Keychain 版位于 test-output/credentials-0.1.0/repo，已构建/自动测试，等待用户本地签名后部署验收。未经签名的 SSH Keychain 探针失败 -25308，不能声称原生私钥迁移已经通过。不要访问个人开发者私钥、不要覆盖 Mac 主工作区。详见 docs/CREDENTIAL_STORAGE.md 和 PROTOTYPE_RESULTS.md 最新段落。
+
+
 ## 0.1.0 prototype 部署（最新，覆盖以下历史运行状态）
 
 已按用户选择安装两边当前用户版本并配置登录启动，保留正式 default 配对。Windows 在 LocalAppData/Rustboard/bin；Mac 在 ~/Applications/Rustboard.app 和 ~/Library/Application Support/Rustboard/bin，由 launchd 运行。不要按历史测试清理步骤停止/撤销这套日常安装。

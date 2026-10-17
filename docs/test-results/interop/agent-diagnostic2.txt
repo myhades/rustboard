@@ -1,0 +1,5 @@
+native text publication complete
+native file publication complete
+IPC request failed: No route to host (os error 65)
+IPC request failed: No route to host (os error 65)
+local offer published content_bytes_read=0

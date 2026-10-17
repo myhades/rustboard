@@ -1,0 +1,22 @@
+native text publication complete
+native file publication complete
+native text publication complete
+native file publication complete
+local offer published content_bytes_read=0
+IPC request failed: expired
+File Provider: File Provider failure domain=Rustboard.WireError code=1
+provider eviction failed
+local offer published content_bytes_read=0
+local offer published content_bytes_read=0
+native text publication complete
+native file publication complete
+local offer published content_bytes_read=0
+IPC request failed: expired
+File Provider: File Provider failure domain=Rustboard.WireError code=1
+provider eviction failed
+native text publication complete
+native file publication complete
+native text publication complete
+local offer published content_bytes_read=0
+native text publication complete
+local offer published content_bytes_read=0

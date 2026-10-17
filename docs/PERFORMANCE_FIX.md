@@ -1,9 +1,10 @@
 # Data-path performance fixes — 2026-10-17
 
-Two production decoding changes are implemented and validated, including a signed
-Mac Finder run. A further typed-IPC candidate passes diagnostic tests but has not
-passed signed native acceptance. Windows Explorer and physical two-device acceptance
-remain separate gates. No wire protocol, shared vectors, pairing, authorization,
+Two production decoding changes and typed-IPC responses are implemented and validated,
+including signed Mac Finder and physical Windows Explorer ↔ Mac Finder three-file
+acceptance. See PHYSICAL_INTEROP.md for the later native run, interruptions and
+runtime-context limitation. Near-link-speed performance remains unachieved.
+No wire protocol, shared vectors, pairing, authorization,
 source lifetime or cache policy changed. This round is closed with these limits;
 the next performance project is specified in PERFORMANCE_TARGETS.md.
 
@@ -148,7 +149,7 @@ Agent/peer stopped, test pairing and domain were removed, original extension
 registration restored, and both loopback ports were confirmed closed. No persistent
 login job was installed. Synthetic output files are retained under ignored test-output.
 
-## Additional typed-IPC candidate (not the Finder-tested binary)
+## Additional typed-IPC candidate (historical state before physical acceptance)
 
 Native sampling showed the provider worker waiting in socket reads in 282/343 stack
 samples and the fast decoder in 45/343. The Agent worker still spent many samples
@@ -170,3 +171,13 @@ It has NOT been developer-signed or validated in Finder. The earlier signed buil
 and its evidence are preserved. This distinction must remain explicit until another
 native run. No overall physical-device interoperability or near-link-speed acceptance
 is claimed by these results.
+
+## Later physical acceptance completed
+
+See [PHYSICAL_INTEROP.md](PHYSICAL_INTEROP.md): the user signed the typed-IPC build,
+then a further diagnostic build. Physical Windows Explorer → Mac Finder and Mac
+Finder → Windows Explorer both passed 4KiB/64MiB/1GiB destination hashes, as did
+bidirectional Unicode clipboard text. This supersedes the candidate's unsigned and
+native-untested state above. New data is kept separately under `test-results/interop/`.
+Windows → Mac 1GiB fetch took 244.031s; Mac → Windows three-file Explorer paste took
+about 225.517s to exclusive-open readiness. Neither meets the near-link-speed target.

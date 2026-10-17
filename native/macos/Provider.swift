@@ -77,23 +77,35 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 if progress.isCancelled {completionHandler(nil,nil,CocoaError(.userCancelled));return}
             }
             defer {fetchSlots.signal()}
+            var stage = "lookup"
             do {
                 let item=try lookup(identifier, profile: self.profile)
                 guard let offer=item.offer, let file=item.file, let size=file.size,
                       requestedVersion == nil || requestedVersion == item.itemVersion,
                       let manager=NSFileProviderManager(for:self.domain) else {throw WireError.stale}
                 progress.totalUnitCount=Int64(size)
+                stage = "temporary_directory"
                 let directory = try manager.temporaryDirectoryURL()
                 let removed = try cleanupPending(in: directory)
                 if removed > 0 {log.notice("stale_pending_removed count=\(removed)")}
                 let pending = directory.appendingPathComponent("rb-pending-" + UUID().uuidString)
                 let url = directory.appendingPathComponent("rb-ready-" + UUID().uuidString)
+                stage = "authenticated_ipc"
                 let session = try IPCSession(profile: self.profile)
+                stage = "hydrate"
                 try hydrate(offer,file,to:pending,progress:progress,call: session.call,commit: {try FileManager.default.moveItem(at: $0, to: url)})
                 guard !progress.isCancelled else {try? FileManager.default.removeItem(at:url);throw WireError.cancelled}
                 log.notice("fetch_complete bytes=\(size)")
                 completionHandler(url,item,nil)
-            } catch {log.error("fetch_failed");completionHandler(nil,nil,NSFileProviderError(.serverUnreachable))}
+            } catch {
+                // Log only the stage and typed error code, never paths or file content.
+                let ns = error as NSError
+                log.error("fetch_failed stage=\(stage, privacy: .public) domain=\(ns.domain, privacy: .public) code=\(ns.code)")
+                if case SecurityFailure.stage(let detail, let code) = error {
+                    log.error("fetch_failure_detail stage=\(detail, privacy: .public) code=\(code)")
+                }
+                completionHandler(nil,nil,NSFileProviderError(.serverUnreachable))
+            }
         };return progress
     }
     func enumerator(for identifier:NSFileProviderItemIdentifier,request:NSFileProviderRequest)throws->NSFileProviderEnumerator {

@@ -1,0 +1,8 @@
+{
+  "sampled_agent_cpu_seconds": 16.203125,
+  "sample_count": 442,
+  "elapsed_until_exclusive_open_seconds": 225.517,
+  "start_marker_ms": 1792228404730,
+  "max_agent_working_set_bytes": 19415040.0,
+  "full_size_observed_ms": 1792228630242
+}

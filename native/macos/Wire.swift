@@ -171,7 +171,7 @@ final class IPCSession {
         }; return result
     }
     let reply = try decodeReply(readExact(frameLength(readExact(4))))
-    guard reply.ok, reply.protocol == 1 else {throw WireError.unavailable}; return reply
+    guard reply.ok, reply.protocol == 1 else {throw SecurityFailure.stage("ipc_reply_" + operation.type, 0)}; return reply
     }
 }
 
@@ -185,10 +185,10 @@ func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
              commit: (URL) throws -> Void = {_ in}) throws {
     guard let size = file.size, size <= Int64.max else {throw WireError.invalid}
     let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, S_IRUSR | S_IWUSR)
-    guard fd >= 0 else {throw WireError.unavailable}
+    guard fd >= 0 else {throw SecurityFailure.stage("hydrate_open", errno)}
     var success = false
     defer {close(fd); if !success {unlink(url.path)} }
-    guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {throw WireError.unavailable}
+    guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {throw SecurityFailure.stage("hydrate_lock", errno)}
     let requestID = UInt64.random(in: 1...UInt64.max)
     func checkCurrent() throws {
         guard !progress.isCancelled else {throw WireError.cancelled}

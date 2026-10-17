@@ -1,0 +1,20 @@
+{
+  "time": 1792227167.917978,
+  "items": [
+    {
+      "name": "rustboard-1073741824.bin",
+      "size": 1073741824,
+      "blocks": 0
+    },
+    {
+      "name": "rustboard-67108864.bin",
+      "size": 67108864,
+      "blocks": 0
+    },
+    {
+      "name": "rustboard-4096.bin",
+      "size": 4096,
+      "blocks": 0
+    }
+  ]
+}

@@ -221,3 +221,16 @@
 - 用户报告 Windows→Mac iperf 约400 Mbps；目标为真实文件交付接近同环境测速上限、本地同盘交付额外耗时可忽略，并以低CPU/低内存扩展到10G级链路。当前尚未证明这些目标。
 - 专项范围、分层责任、单位换算、资源指标与验收顺序见 docs/PERFORMANCE_TARGETS.md；最新修复及证据汇总见 docs/PERFORMANCE_FIX.md。
 - 不再触发签名/部署/原生测试；保留Mac主工作区、两个隔离构建和测试证据。不推送GitHub。
+
+## 真机双向验收完成 — 2026-10-17（最新状态，覆盖上段暂停安排）
+
+- 用户随后要求先提交，再补齐原生及实体双向缺口。前轮修复已本地提交 `083b9c5`，未push。
+- 用户签署 typed-repo 候选及本轮诊断构建；签名校验通过，实际运行路径核对无误。
+- 初始脱离SSH会话的Agent主动LAN连接报 `No route to host (65)`；相同签名Agent保持SSH会话运行后读取成功。未改权限或防火墙，后台部署的局域网授权仍须独立验收。
+- 两次Finder复制被Mac新Offer撤销：首次用户确认iPhone复制，第二次观察到 `com.apple.is-remote-clipboard`。用户暂关iPhone接力后稳定完成；保留中断证据。
+- PASS：真实Windows Explorer→Mac Finder三文件4KiB/64MiB/1GiB全部独立SHA256一致；初始零块。1GiB fetch244.031秒，64MiB15.316秒，4KiB0.087秒。这同时补齐typed IPC候选的签名原生读取。
+- PASS：真实Mac Finder→Windows Explorer三文件独立SHA256全部一致；点击前标记至最后大文件可独占打开225.517秒，包含三文件及Explorer开销。
+- PASS：双向原生剪贴板Unicode文本，UTF-8逐字节一致。不是文本编辑器UI粘贴。
+- 新增Provider阶段/错误码和Agent IPC错误日志；新增现有测试身份/配对的单块TLS诊断example。Windows13项测试/fmt/clippy、Mac12项测试/Swift/fmt/clippy/完整构建通过。
+- 清理：两端测试pin清空、Agent退出、45451/45452无监听；Mac测试domain移除，原扩展注册恢复。未安装持久服务，Mac主工作区未改。用户可恢复iPhone接力。
+- 证据及边界见 docs/PHYSICAL_INTEROP.md、docs/test-results/interop/。正常三文件双向通过不等于整机重启/完整故障矩阵/近链路吞吐通过；下一轮仍按 docs/PERFORMANCE_TARGETS.md 做专项。无GitHub push。

@@ -154,7 +154,10 @@ impl Server {
                                     IpcOperation::Control { args } => server.handle(&node, args).map(IpcReply::Other),
                                     op => node.local_ipc_reply(op),
                                 }
-                            })().unwrap_or_else(|_| IpcReply::Other(serde_json::json!({"ok":false,"protocol":1,"code":"io","error":"request failed"})));
+                            })().unwrap_or_else(|error| {
+                                eprintln!("IPC request failed: {error:#}");
+                                IpcReply::Other(serde_json::json!({"ok":false,"protocol":1,"code":"io","error":"request failed"}))
+                            });
                             write_frame(&mut stream, &reply)?;
                         }
                         Ok(())

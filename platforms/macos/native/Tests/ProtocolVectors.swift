@@ -14,7 +14,7 @@ import CryptoKit
         do {_ = try JSONDecoder().decode(DataMessage.self,from:badData);fatalError("accepted invalid byte")} catch {}
         let unknown=Data(#"{"type":"data","request_id":7,"offset":249,"bytes":[1],"eof":false,"extra":true}"#.utf8)
         do {_ = try JSONDecoder().decode(DataMessage.self,from:unknown);fatalError("accepted unknown field")} catch {}
-        let encoded = try JSONEncoder().encode(Envelope(request: Operation(type:"read_binary",request_id:UInt64.max,offer_id:v.offer.offer_id,file_id:v.offer.content.files![0].file_id,version:"pattern-v1",offset:9007199254740993,length:5)))
+        let encoded = try JSONEncoder().encode(Envelope(request: Operation(type:"read_binary",request_id:UInt64.max,offer_id:v.offer.offer_id,file_id:v.offer.content.files![0].file_id,version:"pattern-v1",offset:9007199254740993,length:5,background:false)))
         let string=String(data:encoded,encoding:.utf8)!
         precondition(string.contains("18446744073709551615") && string.contains("9007199254740993"))
         let framedLength = try frameLength(frame(encoded).prefix(4)); precondition(framedLength == encoded.count)
@@ -23,6 +23,12 @@ import CryptoKit
         }
         let file=FileEntry(file_id:v.offer.content.files![0].file_id,relative_path:"sample.bin",size:131073,version:"pattern-v1",media_type:"application/octet-stream")
         let offer=Offer(protocol:1,source_device:v.offer.source_device,offer_id:v.offer.offer_id,event_sequence:UInt64.max-2,expires_unix_ms:UInt64(Date().timeIntervalSince1970*1000)+600000,content:Content(kind:"files",files:[file],text:nil))
+        func sized(_ size: UInt64?) -> FileEntry { FileEntry(file_id:file.file_id,relative_path:file.relative_path,size:size,version:file.version,media_type:file.media_type) }
+        precondition(eagerEligible([sized(24_999_999),sized(25_000_000)]))
+        precondition(!eagerEligible([sized(25_000_000),sized(25_000_000)]))
+        precondition(!eagerEligible([sized(nil)]))
+        precondition(!eagerEligible([sized(UInt64.max)]))
+        precondition(!eagerEligible([]))
         try offer.validate()
         let roundtrip=try JSONDecoder().decode(Offer.self,from:JSONEncoder().encode(offer))
         precondition(roundtrip.event_sequence==UInt64.max-2)

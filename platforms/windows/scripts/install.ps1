@@ -1,4 +1,4 @@
-param([string]$Listen, [string]$Source='')
+param([string]$Listen, [string]$Source='', [switch]$NoPath)
 $ErrorActionPreference='Stop'
 if (!$Source) {
     $Source=Join-Path $PSScriptRoot '../../../bin'
@@ -21,6 +21,7 @@ $env:RUSTBOARD_PROFILE='default'
 try {
     $cli=Join-Path $bin 'rustboard.exe'
     $agent=Join-Path $bin 'rustboardd.exe'
+    $enableStartup=!(Test-Path -LiteralPath $cli) -or $null -ne (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Rustboard -ErrorAction SilentlyContinue)
     if (Test-Path -LiteralPath $cli) {
         & $cli stop 2>$null | Out-Null
         for ($i=0; $i -lt 50; $i++) {
@@ -35,8 +36,10 @@ try {
     $config=[pscustomobject]@{schema=2;listen=$null;mode='all';peers=@();identity=$null}
     if (Test-Path -LiteralPath $configPath) { $config=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
     if ($Listen) {$config.listen=$Listen}
-    if (!$config.listen) {throw 'First install requires -Listen <LAN-IP:port>'}
+    # Fresh installs can start unpaired, with networking off until configured.
     [IO.File]::WriteAllText($configPath,($config | ConvertTo-Json -Depth 16),[Text.UTF8Encoding]::new($false))
+    if (!$NoPath) { & (Join-Path $PSScriptRoot 'path.ps1') -Action Add }
+    if (!$enableStartup) { Write-Output 'Updated; service remains disabled. Use rustboard start to enable.'; return }
     & (Join-Path $PSScriptRoot 'autostart.ps1') -Action Install -Agent $agent
     Start-Process -FilePath $agent -WindowStyle Hidden -RedirectStandardOutput (Join-Path $base 'agent.out.log') -RedirectStandardError (Join-Path $base 'agent.err.log') | Out-Null
     for ($i=0; $i -lt 50; $i++) {

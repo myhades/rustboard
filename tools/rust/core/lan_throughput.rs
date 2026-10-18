@@ -108,6 +108,7 @@ fn main() -> Result<()> {
         let t = Instant::now();
         if ipc {
             let reply = node.local_ipc_reply(IpcOperation::ReadBinary {
+                background: false,
                 request_id: offset / MAX_CHUNK as u64,
                 offer_id: offer.offer_id.clone(),
                 file_id: file.file_id.clone(),

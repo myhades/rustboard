@@ -35,7 +35,7 @@ pub fn load(dir: &Path) -> Result<Value> {
     let value = if path.exists() {
         read_json(&path)?
     } else {
-        json!({"schema":2,"listen":null,"mode":"all","peers":[],"identity":null})
+        json!({"schema":2,"listen":null,"mode":"all","macos_eager_download":false,"peers":[],"identity":null})
     };
     validate(&value)?;
     Ok(value)
@@ -45,9 +45,15 @@ fn validate(value: &Value) -> Result<()> {
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("config must be an object"))?;
     ensure!(
-        object
-            .keys()
-            .all(|k| ["schema", "listen", "mode", "peers", "identity"].contains(&k.as_str())),
+        object.keys().all(|k| [
+            "schema",
+            "listen",
+            "mode",
+            "peers",
+            "identity",
+            "macos_eager_download"
+        ]
+        .contains(&k.as_str())),
         "unknown config key"
     );
     ensure!(
@@ -69,6 +75,9 @@ fn validate(value: &Value) -> Result<()> {
             || (value["identity"].is_null() && value["peers"].as_array().unwrap().is_empty()),
         "invalid identity"
     );
+    if let Some(enabled) = object.get("macos_eager_download") {
+        ensure!(enabled.is_boolean(), "macos_eager_download must be boolean");
+    }
     peers(value)?;
 
     Ok(())
@@ -216,6 +225,12 @@ mod validation_tests {
     fn malformed_settings_and_duplicate_peers_are_rejected() {
         let mut value =
             json!({"schema":2,"listen":"127.0.0.1:45451","mode":"all","peers":[],"identity":{}});
+        validate(&value).unwrap();
+        value["macos_eager_download"] = true.into();
+        validate(&value).unwrap();
+        value["macos_eager_download"] = "true".into();
+        assert!(validate(&value).is_err());
+        value["macos_eager_download"] = false.into();
         validate(&value).unwrap();
         value["listen"] = "not-an-address".into();
         assert!(validate(&value).is_err());

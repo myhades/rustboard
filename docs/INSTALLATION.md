@@ -49,7 +49,7 @@ Rustboard cannot silently grant this permission; no installer or script modifies
 
 ## Pair both ends
 
-Use the installed CLI path shown above, or add its bin directory to your shell PATH.
+Use `rustboard` in a new terminal after installation, or use the installed CLI path shown above.
 
 On the receiving machine run `rustboard pair`. It displays its certificate fingerprint and waits for up to 120 seconds. On the other machine run `rustboard pair <IP>[:port]` (default port 45452). Both terminals show the other device's certificate fingerprint. Compare each against the fingerprint displayed locally on the other machine, and type `y` on BOTH sides. Default/EOF declines. On success, restart both services with `rustboard restart`.
 
@@ -80,7 +80,7 @@ Runtime fields in `config.json` (the full generated schema-2 file also contains 
 {"listen":"192.168.100.6:45451","mode":"all"}
 ```
 
-Use the machine's own address/port. CLI `--listen` on the Agent overrides the file for that run. Updating listen requires restarting the Agent; rerunning the installer updates installation and startup. A missing address causes bind/start failure rather than silently listening on every interface.
+Use the machine's own address/port. CLI `--listen` on the Agent overrides the file for that run. Updating listen requires restarting the Agent; rerunning the installer updates installation and startup. A null listen address disables the listener; an unavailable configured address fails startup rather than silently listening on every interface.
 
 Configuration edits, pairing and unpairing are saved for the next startup, without live reload. `status` reports pending changes. Run `rustboard restart` after editing. Package restart scripts are wrappers for that command. To immediately revoke access, use `stop` (also disables login startup); a later `start` loads the saved config.
 
@@ -99,3 +99,152 @@ Windows logs: `%LOCALAPPDATA%/Rustboard/agent.err.log` for installer-started pro
 Release evidence is recorded separately in [STATUS.md](STATUS.md); prior file-throughput measurements in [archived performance results](archive/PERFORMANCE_LAYERED.md) are historical, not proof of this installed build.
 
 No folder recursion, native inline-image fidelity, automatic updates, public notarization, universal application compatibility, restart-after-OS-reboot guarantee, or 10G performance claim. Previously measured file throughput is not a promise for every network. Clipboard data is not stored as history; retained synthetic test files are not included in packages.
+
+### macOS small-file eager download (optional)
+
+Add `"macos_eager_download": true` to the top level of `config.json`, then run
+`rustboard reload`. The default is false (also when omitted); Windows ignores this
+macOS-only setting. Existing identity and peer entries stay unchanged.
+
+Files are always published immediately as File Provider URLs, with no body reads.
+When enabled, macOS schedules background downloads only if the entire incoming
+batch has known sizes totaling strictly less than 50,000,000 bytes. Otherwise the
+whole batch remains lazy. Completion never rewrites the clipboard. Local paste can
+request contents immediately through the existing File Provider path. This also
+applies to images carried as ordinary files. iPhone-to-Windows transfers use the
+existing capture path.
+
+Downloads are scheduled with NSFileProviderManager.requestDownloadForItem, using
+the existing File Provider and its expiry/cleanup rules. The system handles the
+actual hydration; there is no second cache or transfer protocol. Clipboard polling
+continues, and newer clipboard events do not revoke active copies. Scheduling
+failure leaves the published files available for normal on-demand reads and logs
+the failure. A successful scheduling callback does not mean hydration is complete. iPhone paste should be attempted after download completes;
+pasting while a file is still dataless can encounter the existing Handoff issue. With the option disabled, publication
+continues to read no file bodies. Enabling it consumes network traffic even when
+nothing is pasted. Handoff still depends on Apple's normal device/account setup;
+this option makes small files available locally, it does not replace Handoff.
+
+
+## Distribution: Homebrew Cask and Scoop
+
+The package managers own their command links: Homebrew links `rustboard`
+in its existing prefix/bin, and Scoop creates the
+`rustboard` shim. Neither package needs to rewrite shell profiles or user PATH.
+Homebrew/Scoop themselves must already be on PATH. Uninstall removes these links,
+the installed executables and login startup, but retains identity, pairing and
+configuration. Do not mix direct and package-manager installations.
+
+Direct Windows `install.ps1` also adds `%LOCALAPPDATA%\Rustboard\bin` to the user
+PATH, broadcasts the environment change, and records ownership. `uninstall.ps1`
+removes only that owned entry; pre-existing entries are preserved. Open a new
+terminal to inherit it. Direct Mac `install.sh` installs links in `~/.local/bin`
+and a marked PATH stanza in `.zprofile` and `.bash_profile`; uninstall removes only
+those links/stanzas. Other shells require their own PATH setup. Both installers
+preserve a previously disabled service during updates. A fresh install without a
+listen argument starts unpaired with networking off: set `listen` in
+`rustboard config`, save and `rustboard reload`, then pair.
+
+### Prepare distribution repositories
+
+Mac (user signs first; package script never signs):
+
+```sh
+python3 platforms/macos/scripts/package.py --release-url https://github.com/myhades/rustboard/releases/download/v0.1.0-prototype/rustboard-0.1.0-prototype-macos-arm64.tar.gz
+```
+
+This generates the archive, its SHA-256 and `target/macos/homebrew-tap/Casks/rustboard.rb`.
+Without `--release-url` it generates a local-file Cask for local validation only.
+The architecture is checked from the binary; Intel builds use a separate x86_64
+archive. The generated single-architecture Cask declares that restriction.
+The Cask uses the existing vendor installer and requires Python 3.13 for its
+configuration/plist scripts; this is an installer dependency, not an Agent runtime.
+
+Windows:
+
+```powershell
+./platforms/windows/scripts/package.ps1 -OutputRoot target/distribution -ReleaseUrl https://github.com/myhades/rustboard/releases/download/v0.1.0-prototype/rustboard-0.1.0-prototype-windows-x64.zip
+```
+
+This generates the zip, SHA-256 and `target/distribution/scoop-bucket/bucket/rustboard.json`.
+Scoop installation is per-user only. Its update path retains settings and does not
+run the destructive uninstall hook between versions. No admin rights are needed.
+
+Publish the exact archives as release assets, and publish the generated repository
+contents to `myhades/homebrew-tap` and `myhades/scoop-bucket`. Only after those exist:
+
+```sh
+brew tap myhades/tap
+brew install --cask myhades/tap/rustboard
+brew uninstall --cask rustboard
+```
+
+```powershell
+scoop bucket add myhades https://github.com/myhades/scoop-bucket
+scoop install myhades/rustboard
+scoop uninstall rustboard
+```
+
+These are release instructions, not a claim that the remote taps/assets already
+exist. Checksums are computed from the actual package; never publish placeholder
+checksums or modify an archive after publishing its manifest.
+
+### macOS permissions and Open Anyway
+
+Allow the normal macOS permission prompt when it first appears. If it was dismissed
+or denied, change the permission manually in **System Settings → Privacy & Security**:
+
+- **Full Disk Access**: add the installed Agent at
+  `~/Library/Application Support/Rustboard/bin/rustboardd` when access to protected
+  files is needed. Text sync alone does not require this broad permission. Reload
+  the Agent after granting access.
+- **Local Network**: enable the responsible Rustboard process if it was denied.
+  Attribution depends on launch context; absence from the list does not prove denial.
+  Firewall rules are separate and are not changed by the installer.
+- **Open Anyway**: after attempting to launch a blocked component, review the
+  Gatekeeper message in Privacy & Security and approve it yourself, then retry.
+
+There is no separate permissions command. Installers do not strip quarantine,
+disable Gatekeeper, reset TCC or press approval buttons.
+
+For public distribution use Developer ID signing and notarization; **Apple
+Development signing is for development and is not a public-distribution substitute**.
+Open Anyway does not repair invalid signatures or provisioning restrictions. The
+current development build has not been represented as notarized. Signing and
+notarization using personal credentials remain user-operated.
+
+References: [Apple local network privacy](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy),
+[Apple safe app opening](https://support.apple.com/102445),
+[Homebrew Cask lifecycle](https://docs.brew.sh/Cask-Cookbook),
+[Scoop manifests](https://github.com/ScoopInstaller/Scoop/wiki/App-Manifests).
+
+### File Provider cache lifetime
+
+`macos_eager_download` starts background downloads only when every size is known and the
+entire batch totals less than 50,000,000 bytes, even without a paste. Exactly
+50,000,000 bytes, unknown sizes and larger batches remain lazy. This is a batch
+eligibility threshold; it does not bound accumulated File Provider disk use.
+There is currently no free-space reserve. Background reads do not take the Windows
+transfer lock; detected source rename, move or mutation aborts the download without
+a user prompt. Foreground transfers retain their existing locking behavior.
+
+The core retains the current batch and batches owned by active native transfers.
+Clipboard replacement immediately drops an old batch without an owner. There is
+no descriptor grace period or read-renewal timeout. A live transfer can bridge
+idle read-connection reconnects; closing its ownership channel releases the batch.
+Windows keeps one batch owner across the presented multi-file data object. macOS
+keeps an owner for each File Provider fetch; it has no notification for the lifetime
+of an entire Finder paste. A later request after the last owner has ended cannot
+revive a discarded batch. Concurrent active batches and metadata remain bounded.
+
+The Mac Agent requests eviction as soon as the retained set changes, retries
+failures every ten seconds, and performs a full indexed-cache reset before accepting
+new offers on startup and on graceful exit (including SIGTERM). Crash/forced-kill
+cleanup runs on next startup. These are cleanup requests, not a promise of immediate
+physical disk reclamation by macOS. Active locked partial downloads are never unlinked;
+abandoned partial downloads are cleaned at reset or a subsequent fetch.
+
+Files pasted into a destination folder have a separate lifetime: deleting them does
+not notify Rustboard to evict its File Provider cache. Successful fetch result files
+are handed to the system's File Provider storage management, not manually deleted
+behind the framework's back. The batch threshold is not a free-space guarantee.

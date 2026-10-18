@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-19",
+  "windows": {
+    "path_roundtrip": "PASS: exact prior User PATH restored, repeated add idempotent",
+    "installed_upgrade": "PASS",
+    "uninstall_reinstall": "PASS: binaries/autostart removed, config/identity/peers retained, running restored",
+    "package": "zip + SHA-256 + Scoop bucket manifest generated",
+    "scoop": "manifest JSON parsed; Scoop is not installed, no end-to-end Scoop claim"
+  },
+  "macos": {
+    "path_roundtrip": "PASS in isolated home; unrelated profile content retained",
+    "cask": "PASS Homebrew info in temporary tap; temporary tap removed",
+    "uninstall_reinstall": "PASS app/domain/CLI/startup removed, identity/peers/config retained; running restored",
+    "package": "signed arm64 tar.gz + SHA-256 + Cask generated",
+    "signing": "Apple Development; not Developer ID or notarized",
+    "permissions": "Manual System Settings documentation only; navigation helper removed; no TCC/Gatekeeper changes"
+  },
+  "publication": "No GitHub release assets or distribution repositories published"
+}

@@ -74,6 +74,7 @@ struct Operation: Encodable {
     var version: String? = nil
     var offset: UInt64? = nil
     var length: UInt32? = nil
+    var background: Bool? = nil
 }
 struct Envelope: Encodable { let `protocol`: UInt16 = 1; let request: Operation }
 let frameLimit = 1048576
@@ -162,7 +163,7 @@ func fileOffers(profile: String) throws -> [Offer] {
     try ipc(Operation(type: "get_file_offers"), profile: profile).offers ?? []
 }
 // Injectable transport makes faults and cancellation testable without a second protocol.
-func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
+func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress, background: Bool = false,
              call: (Operation) throws -> Reply = ipc,
              commit: (URL) throws -> Void = {_ in}) throws {
     guard let size = file.size, size <= Int64.max else {throw WireError.invalid}
@@ -172,6 +173,7 @@ func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
     defer {close(fd); if !success {unlink(url.path)} }
     guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {throw SecurityFailure.stage("hydrate_lock", errno)}
     let requestID = UInt64.random(in: 1...UInt64.max)
+    defer {_ = try? call(Operation(type: "cancel", request_id: requestID))}
     func checkTransfer() throws {
         guard !progress.isCancelled else {throw WireError.cancelled}
         let reply = try call(Operation(type: "get_file_offer", offer_id: offer.offer_id))
@@ -185,7 +187,7 @@ func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
         repeat {
             guard !progress.isCancelled else {throw WireError.cancelled}
             let length = UInt32(min(65536, max(1, size-offset)))
-            let reply = try autoreleasepool { try call(Operation(type: "read_binary", request_id: requestID, offer_id: offer.offer_id, file_id: file.file_id, version: file.version, offset: offset, length: length)) }
+            let reply = try autoreleasepool { try call(Operation(type: "read_binary", request_id: requestID, offer_id: offer.offer_id, file_id: file.file_id, version: file.version, offset: offset, length: length, background: background)) }
             guard reply.ok, reply.protocol == 1, let data = reply.response,
                   data.type == "data", data.request_id == requestID, data.offset == offset,
                   data.bytes.count <= Int(length), UInt64(data.bytes.count) <= size-offset,
@@ -204,7 +206,7 @@ func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
         try commit(url)
         success = true
     } catch {
-        _ = try? call(Operation(type: "cancel", request_id: requestID)); throw error
+        throw error
     }
 }
 
@@ -301,4 +303,14 @@ func cleanupPending(in directory: URL) throws -> Int {
         close(fd)
     }
     return removed
+}
+
+func eagerEligible(_ files: [FileEntry]) -> Bool {
+    var total: UInt64 = 0
+    guard !files.isEmpty else {return false}
+    for file in files {
+        guard let size = file.size, size < 50_000_000 - total else {return false}
+        total += size
+    }
+    return true
 }

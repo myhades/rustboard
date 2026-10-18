@@ -19,4 +19,5 @@ try {
         if (Test-Path -LiteralPath $file) {Remove-Item -LiteralPath $file}
     }
 } finally {$env:RUSTBOARD_PROFILE=$previousProfile}
+& (Join-Path $PSScriptRoot 'path.ps1') -Action Remove
 Write-Output 'Login startup and binaries removed. Identity, pairing, configuration and logs retained.'

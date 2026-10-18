@@ -146,16 +146,26 @@ impl Server {
                 }
                 let (server, node, active) = (server.clone(), node.clone(), active.clone());
                 std::thread::spawn(move || {
+                    let mut requests = std::collections::HashSet::new();
+                    let mut retained = None;
                     let run = || -> Result<()> {
                         authenticate(&stream, false)?;
                         while !node.stop.load(Ordering::Acquire) {
                             let req: IpcRequest = read_frame(&mut stream)?;
 
+                            if let IpcOperation::ReadBinary { request_id, .. } = &req.request {
+                                requests.insert(*request_id);
+                            }
                             let reply = (|| -> Result<IpcReply> {
                                 ensure!(req.protocol == 1, "unsupported protocol");
                                 match req.request {
+                                    IpcOperation::Retain { offer_id } => {
+                                        retained = Some(node.retain_session(&offer_id)?);
+                                        stream.set_read_timeout(None)?;
+                                        Ok(IpcReply::Other(serde_json::json!({"ok":true,"protocol":1})))
+                                    },
                                     IpcOperation::Control { args } => server.handle(&node, args).map(IpcReply::Other),
-                                    op => node.local_ipc_reply(op),
+                                    op => node.local_ipc_session_reply(op, retained.clone()),
                                 }
                             })().unwrap_or_else(|error| {
                                 eprintln!("IPC request failed: {error:#}");
@@ -167,6 +177,10 @@ impl Server {
                     };
                     let mut run = run;
                     let _ = run();
+                    for request_id in requests {
+                        let _ = node.local_ipc_reply(IpcOperation::Cancel { request_id });
+                    }
+                    drop(retained);
                     active.fetch_sub(1, Ordering::AcqRel);
                 });
             }
@@ -223,6 +237,7 @@ mod tests {
         assert_eq!(metadata["offer"]["offer_id"], offer.offer_id);
         assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
         let read = |version: &str, offset, length| IpcOperation::ReadBinary {
+            background: false,
             request_id: 7,
             offer_id: offer.offer_id.clone(),
             file_id: id.clone(),
@@ -245,6 +260,12 @@ mod tests {
                 .unwrap()["ok"],
             true
         );
+        let _transfer = node
+            .engine
+            .lock()
+            .unwrap()
+            .retain_batch(&offer.offer_id)
+            .unwrap();
         node.engine
             .lock()
             .unwrap()

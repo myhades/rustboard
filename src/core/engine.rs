@@ -5,8 +5,8 @@ use anyhow::{Result, ensure};
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    sync::{Arc, Weak},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 pub fn now_ms() -> u64 {
@@ -19,16 +19,12 @@ pub fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-// A short handoff grace bridges native descriptor acquisition and the first read.
-// Reads renew the whole batch so sequential files survive clipboard replacement.
-const HANDOFF_GRACE: Duration = Duration::from_secs(30);
-const TRANSFER_IDLE: Duration = Duration::from_secs(120);
-const MAX_BATCHES: usize = 8;
+// Bound concurrent active transfers, not idle clipboard history.
+const MAX_ACTIVE_BATCHES: usize = 8;
 struct FileBatch {
     offer: Offer,
     sources: HashMap<String, Arc<dyn ReadAt>>,
-    retired: Option<Instant>,
-    active_until: Option<Instant>,
+    readers: Weak<()>,
 }
 pub struct Engine {
     pub device_id: String,
@@ -87,17 +83,23 @@ impl Engine {
     }
     /// Clipboard replacement is not explicit transfer revocation.
     pub fn clear_clipboard(&mut self) {
-        self.retire_current();
         self.current = None;
+        self.expire();
     }
-    fn retire_current(&mut self) {
-        if let Some(batch) = self
-            .current
-            .as_ref()
-            .and_then(|o| self.batches.get_mut(&o.offer_id))
-        {
-            batch.retired.get_or_insert(Instant::now());
+    /// The caller owns this token for the native transfer lifetime, including gaps
+    /// between bounded reads. The engine keeps no strong reference to it.
+    pub fn retain_batch(&mut self, id: &str) -> Result<Arc<()>> {
+        self.expire();
+        let batch = self
+            .batches
+            .get_mut(id)
+            .ok_or_else(|| anyhow::anyhow!("file offer expired"))?;
+        if let Some(readers) = batch.readers.upgrade() {
+            return Ok(readers);
         }
+        let readers = Arc::new(());
+        batch.readers = Arc::downgrade(&readers);
+        Ok(readers)
     }
     fn register_batch(
         &mut self,
@@ -107,7 +109,11 @@ impl Engine {
         self.expire();
         if matches!(offer.content, Content::Files { .. }) {
             ensure!(
-                self.batches.len() < MAX_BATCHES,
+                self.batches
+                    .values()
+                    .filter(|b| b.readers.strong_count() > 0)
+                    .count()
+                    < MAX_ACTIVE_BATCHES,
                 "file transfer capacity reached"
             );
             // Bound retained metadata as well as the number of stable-source handles.
@@ -115,6 +121,7 @@ impl Engine {
             let total: usize = self
                 .batches
                 .values()
+                .filter(|b| b.readers.strong_count() > 0)
                 .map(|b| serde_json::to_vec(&b.offer).map(|v| v.len()))
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
@@ -128,12 +135,10 @@ impl Engine {
                 FileBatch {
                     offer: offer.clone(),
                     sources,
-                    retired: None,
-                    active_until: None,
+                    readers: Weak::new(),
                 },
             );
         }
-        self.retire_current();
         Ok(())
     }
     pub fn retained_offers(&mut self) -> Vec<Offer> {
@@ -171,7 +176,6 @@ impl Engine {
                 .any(|f| f.file_id == file && f.version == version),
             "file/version mismatch"
         );
-        batch.active_until = Some(Instant::now() + TRANSFER_IDLE);
         Ok(())
     }
     pub fn local(
@@ -204,6 +208,7 @@ impl Engine {
         ));
         self.save_clock()?;
         self.current = Some(offer.clone());
+        self.expire();
         Ok(offer)
     }
     pub fn accept(&mut self, offer: Offer, authenticated_device: &str) -> Result<bool> {
@@ -231,6 +236,7 @@ impl Engine {
         ));
         self.save_clock()?;
         self.current = Some(offer);
+        self.expire();
         self.accepted += 1;
         Ok(true)
     }
@@ -240,15 +246,11 @@ impl Engine {
             .as_ref()
             .is_some_and(|o| o.expires_unix_ms <= now_ms())
         {
-            self.clear_clipboard();
+            self.current = None;
         }
-        let now = Instant::now();
-        self.batches.retain(|_, b| {
-            b.active_until.is_some_and(|until| until > now)
-                || b.retired.map_or(b.offer.expires_unix_ms > now_ms(), |at| {
-                    now.duration_since(at) < HANDOFF_GRACE
-                })
-        });
+        let current = self.current.as_ref().map(|o| o.offer_id.as_str());
+        self.batches
+            .retain(|id, b| Some(id.as_str()) == current || b.readers.strong_count() > 0);
     }
     pub fn source(
         &mut self,
@@ -295,79 +297,39 @@ mod tests {
         engine.local(Content::Files { files }, sources).unwrap()
     }
     #[test]
-    fn batch_survives_clipboard_changes_and_expires_after_idle() {
+    fn only_current_and_owned_transfers_survive_replacement() {
         let mut e = Engine::new(new_id());
         let first = batch(&mut e);
-        let Content::Files { files } = &first.content else {
-            panic!()
-        };
-        e.source(
-            &first.source_device,
-            &first.offer_id,
-            &files[0].file_id,
-            "v",
-        )
-        .unwrap();
+        let transfer = e.retain_batch(&first.offer_id).unwrap();
         let second = batch(&mut e);
-        e.local(
-            Content::Text {
-                text: "new clipboard".into(),
-            },
-            HashMap::new(),
-        )
-        .unwrap();
-        // Old offer TTL and descriptor grace no longer cancel an active batch.
-        let b = e.batches.get_mut(&first.offer_id).unwrap();
-        b.retired = Some(Instant::now() - HANDOFF_GRACE - Duration::from_secs(1));
-        b.offer.expires_unix_ms = 0;
-        let source = e
-            .source(
-                &first.source_device,
-                &first.offer_id,
-                &files[1].file_id,
-                "v",
-            )
-            .unwrap();
-        let mut bytes = [0; 4];
-        assert_eq!(source.read_at(0, &mut bytes).unwrap(), 4);
-        assert_eq!(bytes, [0, 1, 2, 3]);
-        assert!(e.file_offer(&second.offer_id).is_ok());
-        e.batches.get_mut(&first.offer_id).unwrap().active_until =
-            Some(Instant::now() - Duration::from_secs(1));
+        let third = batch(&mut e);
+        assert!(e.file_offer(&second.offer_id).is_err());
+        assert!(e.file_offer(&first.offer_id).is_ok());
+        assert!(e.file_offer(&third.offer_id).is_ok());
+        drop(transfer);
         assert!(e.file_offer(&first.offer_id).is_err());
-        assert!(
-            matches!(&e.current.as_ref().unwrap().content, Content::Text { text } if text == "new clipboard")
-        );
+        for _ in 0..32 {
+            let current = batch(&mut e);
+            assert_eq!(e.retained_offers().len(), 1);
+            assert_eq!(e.retained_offers()[0].offer_id, current.offer_id);
+        }
+        e.clear_clipboard();
+        assert!(e.retained_offers().is_empty());
     }
     #[test]
-    fn capacity_never_evicts_active_batches_and_withdraw_revokes() {
+    fn capacity_protects_active_transfers_and_withdraw_revokes() {
         let mut e = Engine::new(new_id());
-        for _ in 0..MAX_BATCHES {
-            batch(&mut e);
+        let mut transfers = Vec::new();
+        for _ in 0..MAX_ACTIVE_BATCHES {
+            let offer = batch(&mut e);
+            transfers.push(e.retain_batch(&offer.offer_id).unwrap());
         }
         let current = e.current.clone();
-        let result = e.local(
-            Content::Files {
-                files: vec![FileEntry {
-                    file_id: new_id(),
-                    relative_path: "full".into(),
-                    size: Some(0),
-                    version: "v".into(),
-                    media_type: "application/octet-stream".into(),
-                }],
-            },
-            HashMap::new(),
+        assert!(
+            e.local(current.as_ref().unwrap().content.clone(), HashMap::new())
+                .is_err()
         );
-        assert!(result.is_err());
         assert_eq!(e.current, current);
-        assert_eq!(e.batches.len(), MAX_BATCHES);
-        e.local(
-            Content::Text {
-                text: "still usable".into(),
-            },
-            HashMap::new(),
-        )
-        .unwrap();
         e.withdraw();
         assert!(e.retained_offers().is_empty());
     }
@@ -460,7 +422,7 @@ mod tests {
             ),
         ] {
             assert!(e.source(&tuple.0, &tuple.1, &tuple.2, &tuple.3).is_err());
-            assert!(e.batches[&offer.offer_id].active_until.is_none());
+            assert_eq!(e.batches[&offer.offer_id].readers.strong_count(), 0);
         }
         assert!(
             e.source(

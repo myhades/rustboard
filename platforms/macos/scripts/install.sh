@@ -4,10 +4,14 @@ cd "$(dirname "$0")/../../.."
 out="$PWD/target/macos"
 if [ -d "$PWD/Rustboard.app" ] && [ -d "$PWD/bin" ]; then out="$PWD"; fi
 listen=""
-if [ "$#" -gt 0 ]; then
-  [ "$#" -eq 2 ] && [ "$1" = --listen ] || { echo 'Usage: install.sh --listen LAN-IP:port' >&2; exit 1; }
-  listen="$2"
-fi
+manage_path=true
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --listen) [ "$#" -ge 2 ] || exit 64; listen="$2"; shift 2 ;;
+    --no-path) manage_path=false; shift ;;
+    *) echo 'Usage: install.sh [--listen IP:port] [--no-path]' >&2; exit 64 ;;
+  esac
+done
 export RUSTBOARD_PROFILE=default
 # Do not deploy unsigned builds or silently relax Gatekeeper/quarantine.
 codesign --verify --deep --strict "$out/Rustboard.app"
@@ -27,7 +31,7 @@ if sys.argv[2]:
     host,port=sys.argv[2].rsplit(':',1); ipaddress.ip_address(host.strip('[]'))
     if not 0<int(port)<65536:raise SystemExit('Invalid port')
     v['listen']=sys.argv[2]
-if not v.get('listen'):raise SystemExit('First install requires --listen LAN-IP:port')
+# Fresh installs may start unpaired with networking off.
 temporary=directory/'config.new';temporary.write_text(json.dumps(v,indent=2));temporary.replace(path);path.chmod(0o600)
 PYCONFIG
 base="$HOME/Library/Application Support/Rustboard"
@@ -39,16 +43,27 @@ if [ -e "$app" ]; then
   id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist")
   [ "$id" = org.rustboard.host ] || { echo 'Unexpected existing app' >&2; exit 1; }
 fi
+enabled=true
+if launchctl print-disabled "gui/$(id -u)" | grep -Eq '"org.rustboard.agent" => (true|disabled)'; then enabled=false; fi
 launchctl bootout "gui/$(id -u)/org.rustboard.agent" 2>/dev/null || true
 /usr/bin/ditto "$out/Rustboard.app" "$app"
 cp "$out/bin/rustboardd" "$out/bin/rustboard" "$base/bin/"
 /usr/bin/pluginkit -a "$app/Contents/PlugIns/RustboardProvider.appex"
-"$app/Contents/MacOS/Rustboard" register
+if ! "$app/Contents/MacOS/Rustboard" register; then
+  echo "Registration failed. Check System Settings > Privacy & Security for an Open Anyway prompt, then retry." >&2
+  exit 1
+fi
+if $manage_path; then python3 platforms/macos/scripts/path.py add; fi
 python3 platforms/macos/scripts/launchd.py "$base" "$app" "$HOME/Library/LaunchAgents/org.rustboard.agent.plist"
+if ! $enabled; then echo 'Updated; service remains disabled. Use rustboard start to enable.'; exit 0; fi
 launchctl enable "gui/$(id -u)/org.rustboard.agent"
 launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.rustboard.agent.plist"
 for attempt in {1..50}; do
-  if "$base/bin/rustboard" status --json 2>/dev/null; then exit 0; fi
+  if "$base/bin/rustboard" status --json 2>/dev/null; then
+    echo "CLI ready. Open a new terminal after direct installation. Configure listen/peers with rustboard config; apply with rustboard reload."
+    echo "Permissions: see docs/INSTALLATION.md for manual System Settings instructions."
+    exit 0
+  fi
   sleep 0.2
 done
 echo 'Agent failed to start; inspect the installed agent logs' >&2

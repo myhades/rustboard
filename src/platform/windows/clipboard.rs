@@ -85,7 +85,11 @@ pub fn set_text(window: HWND, text: &str) -> anyhow::Result<()> {
         }
     }
     drop(_guard); // Windows finalizes the clipboard sequence when the owner closes it.
-    STATE.with_borrow_mut(|s| s.self_sequence = unsafe { GetClipboardSequenceNumber() });
+    STATE.with_borrow_mut(|s| {
+        s.self_sequence = unsafe { GetClipboardSequenceNumber() };
+        s.remote_object = None;
+        s.remote_offer = None;
+    });
     Ok(())
 }
 
@@ -235,6 +239,17 @@ unsafe extern "system" fn procedure(
     // Never unwind through Win32.
     let result = std::panic::catch_unwind(|| {
         match message {
+            WM_QUERYENDSESSION => return LRESULT(1),
+            WM_ENDSESSION if wparam.0 != 0 => {
+                STATE.with_borrow(|s| {
+                    if let Some(node) = &s.node {
+                        node.engine.lock().unwrap().withdraw();
+                    }
+                });
+                unsafe {
+                    let _ = DestroyWindow(window);
+                }
+            }
             WM_CLIPBOARDUPDATE => update(window),
             WM_TIMER => {
                 tick(window);
@@ -337,6 +352,7 @@ pub fn run() -> anyhow::Result<()> {
         let _ = RemoveClipboardFormatListener(window);
     }
     node.stop.store(true, Ordering::Release);
+    node.engine.lock().unwrap().withdraw();
     STATE.with_borrow_mut(|s| {
         s.remote_object = None;
         s.node = None;
@@ -391,16 +407,17 @@ fn tick(window: HWND) {
                         files.iter().all(|f| f.size.is_some()),
                         "unknown file sizes unsupported by Windows presentation"
                     );
+                    let sources = crate::core::transport::RemoteSource::batch(
+                        node.clone(),
+                        peer.clone(),
+                        offer.clone(),
+                    );
                     let files = files
                         .iter()
-                        .map(|file| PresentedFile {
+                        .zip(sources)
+                        .map(|(file, source)| PresentedFile {
                             name: file.relative_path.clone(),
-                            source: Arc::new(crate::core::transport::RemoteSource::new(
-                                node.clone(),
-                                peer.clone(),
-                                offer.clone(),
-                                file.clone(),
-                            )) as Arc<dyn crate::core::ReadAt>,
+                            source,
                         })
                         .collect();
                     backend.publish_files(files)?;

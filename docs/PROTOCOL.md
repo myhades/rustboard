@@ -52,7 +52,7 @@ Envelope: `{"protocol":1,"request":{...}}`.
 
 - `{"type":"control","args":["status"]}` etc: native Agent control.
 - `{"type":"get_offer"}` → `{"ok":true,"protocol":1,"offer":<Offer or null>}`.
-- `{"type":"read_binary","request_id":7,"offer_id":"...","file_id":"...","version":"...","offset":249,"length":5}` → binary Data frame. Source device is resolved from the current authenticated Offer, never supplied as a path.
+- `{"type":"read_binary","background":false,"request_id":7,"offer_id":"...","file_id":"...","version":"...","offset":249,"length":5}` → binary Data frame. Source device is resolved from the current authenticated Offer, never supplied as a path.
 - `{"type":"get_file_offer","offer_id":"..."}` → retained batch metadata; `get_file_offers` lists retained file batches. Neither operation reads file bodies or renews idle deadlines.
 - `{"type":"cancel","request_id":7}` → successful acknowledgment. Stop scheduling further reads; one in-flight bounded request may complete.
 
@@ -106,10 +106,30 @@ Implementation candidate, 2026-10-18. Windows and Mac automated validation/build
 
 The current clipboard remains one latest Offer. File batches have a separate bounded registry of metadata and stable source handles. Replacing the clipboard, including with text or unsupported content, retires the presentation without revoking the old batch. Explicit withdrawal/service shutdown remains cancellation. Each read still requires a paired TLS peer, matching source/offer/file/version, valid bounds and a valid stable source. No plaintext transport or previous-format compatibility is added.
 
-A retired batch has a 30-second descriptor-to-read grace period. A validated read renews the whole batch for 120 seconds of idle time, including files not yet requested by a sequential consumer. Active reads can continue past the original Offer presentation TTL. Metadata queries alone do not renew a batch. These are monotonic process-local deadlines; sessions do not survive Agent restart. Retained Offers are not rebroadcast or shown as clipboard history. During the bounded retention window a paired peer with the exact tuple can start another read; this is not a single-use transfer token.
+Retained batches now have explicit native owners, not read-renewal deadlines.
+An authenticated TLS `retain {offer_id}` request acknowledges with `ack` and keeps
+the local source batch alive for the lifetime of that connection. The channel
+carries ownership only and closes when the native owner ends. Separate bounded
+read channels may idle/reconnect without losing the batch. Retention never takes
+a Windows write/delete lock; foreground reads retain their existing lock behavior.
+Background reads carry required `background: true` through IPC and TLS and skip
+that lock while detecting source changes.
 
-Limits: 8 file batches total, 256 files per batch, aggregate encoded Offer metadata below 512 KiB. No whole-file byte buffering; the existing 4 MiB read window and two-entry IPC connection cache remain. A full registry rejects new file Offers instead of evicting active batches; text remains usable. Completion/cancellation stops requesting bytes, and retired batch handles/clones are reclaimed on idle expiry (not immediately at one file EOF, which could strand other files/readers). Active source replacement or version failure still fails the read. Source handles may keep Windows files locked and APFS clones may retain changed disk blocks until expiry.
+Only current or actively owned batches survive replacement. There is no clipboard
+history, descriptor grace, or idle batch timeout. Up to eight active batches and
+aggregate encoded metadata below 512 KiB remain safety limits, not history slots.
+A Windows multi-file data object shares one batch owner. A Mac File Provider fetch
+holds a native IPC session owner through completion or failure; cancellation is
+sent on success as well as failure to discard its cached read channel. Native IPC
+disconnection also discards all of that session's request caches and owner. No
+owner survives Agent restart. File Provider exposes per-file fetch lifetimes, not
+an entire Finder paste lifetime; requests arriving after the final old owner has
+ended fail rather than resurrecting old cached content.
 
-Local IPC adds get_file_offer(offer_id) and get_file_offers for retained metadata. read_binary continues to use the existing opaque tuple. Cancellation discards only its request's cached connection, not another concurrent read's cache. Clipboard get_offer still reports only the current item.
+Local IPC `retain {offer_id}` is session-scoped; `get_file_offer` and
+`get_file_offers` query retained metadata without extending lifetime. `get_offer`
+still reports only the current clipboard. This is not single-use authorization:
+a paired peer may acquire another owner while a batch is still available.
+
 
 Windows IDataObject/IStream retain their original source identities. macOS File Provider resolves an item against its retained batch, not the current clipboard, and checks that batch before/after hydration. Internal batch directories isolate identical names from different Offers; users still paste the original file names. The host's presented-batches.json is a current-format runtime ledger, with no old-ledger import. It evicts only expired batches. Root and working-set changes are signaled after cleanup.

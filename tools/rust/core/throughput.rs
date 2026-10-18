@@ -76,6 +76,7 @@ fn main() -> anyhow::Result<()> {
                     );
                 } else {
                     let reply = b.local_ipc(IpcOperation::ReadBinary {
+                        background: false,
                         request_id: offset / 65536,
                         offer_id: offer.offer_id.clone(),
                         file_id: file.file_id.clone(),

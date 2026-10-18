@@ -24,7 +24,11 @@ pub enum IpcOperation {
         offer_id: String,
     },
     GetFileOffers,
+    Retain {
+        offer_id: String,
+    },
     ReadBinary {
+        background: bool,
         request_id: u64,
         offer_id: String,
         file_id: String,
@@ -143,6 +147,9 @@ impl Offer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Message {
+    Retain {
+        offer_id: String,
+    },
     Poll,
     Idle,
     Ack,
@@ -150,6 +157,7 @@ pub enum Message {
         offer: Offer,
     },
     Read {
+        background: bool,
         request_id: u64,
         source_device: String,
         offer_id: String,

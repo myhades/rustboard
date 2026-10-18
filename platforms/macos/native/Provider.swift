@@ -92,7 +92,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     }
     func fetchContents(for identifier:NSFileProviderItemIdentifier,version requestedVersion:NSFileProviderItemVersion?,request:NSFileProviderRequest,completionHandler:@escaping(URL?,NSFileProviderItem?,Error?)->Void)->Progress {
         let progress=Progress(totalUnitCount:0)
-        log.notice("fetch_start")
+        log.notice("fetch_start background=\(request.isSystemRequest)")
         DispatchQueue.global().async {
             while fetchSlots.wait(timeout:.now()+0.1) != .success {
                 if progress.isCancelled {completionHandler(nil,nil,CocoaError(.userCancelled));return}
@@ -113,8 +113,9 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 let url = directory.appendingPathComponent("rb-ready-" + UUID().uuidString)
                 stage = "authenticated_ipc"
                 let session = try IPCSession(profile: self.profile)
+                guard try session.call(Operation(type: "retain", offer_id: offer.offer_id)).ok else {throw WireError.stale}
                 stage = "hydrate"
-                try hydrate(offer,file,to:pending,progress:progress,call: session.call,commit: {try FileManager.default.moveItem(at: $0, to: url)})
+                try hydrate(offer,file,to:pending,progress:progress,background:request.isSystemRequest,call: session.call,commit: {try FileManager.default.moveItem(at: $0, to: url)})
                 guard !progress.isCancelled else {try? FileManager.default.removeItem(at:url);throw WireError.cancelled}
                 log.notice("fetch_complete bytes=\(size)")
                 completionHandler(url,item,nil)

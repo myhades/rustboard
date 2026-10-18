@@ -11,4 +11,5 @@ if [ -d "$app" ]; then
 fi
 rm -f "$HOME/Library/LaunchAgents/org.rustboard.agent.plist"
 rm -f "$HOME/Library/Application Support/Rustboard/bin/rustboard" "$HOME/Library/Application Support/Rustboard/bin/rustboardd"
+python3 "$(dirname "$0")/path.py" remove
 echo 'Removed Rustboard app and login agent. Identity, pairing, and diagnostic data are retained.'

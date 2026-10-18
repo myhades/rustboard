@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-19",
+  "installed": "both signed Mac and Windows candidates installed; identity and peers unchanged",
+  "batch_limit": "Swift boundary tests: below 50,000,000 accepted, equal rejected, unknown/overflow/empty rejected",
+  "native_background": {
+    "bytes": 3840,
+    "request_is_system": true,
+    "windows_write_handle": "held open with write access throughout download",
+    "sha256": "be4fad73a946bd80492173b64db765297ed4395d7976bf5240befae0634f75eb",
+    "blocks_before_verification_read": 8
+  },
+  "native_foreground": {
+    "bytes": 3968,
+    "request_is_system": false,
+    "blocks_before_read": 0,
+    "sha256": "9c32becf6f0929bf09a0d5187529234419f8fc61d30a5db3b1c022566b21425b"
+  },
+  "source_changes": "Windows unit/TLS tests reject rename and same-size write; no cross-machine in-flight mutation claim",
+  "settings": "Mac eager download restored true; no identity or pairing changes",
+  "limits": "No large-file network transfers; no new Finder GUI or iPhone acceptance in this run"
+}

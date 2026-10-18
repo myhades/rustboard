@@ -5,7 +5,10 @@ use anyhow::{Result, ensure};
 use std::{
     ffi::{CStr, CString},
     path::PathBuf,
-    sync::{Arc, atomic::Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 unsafe extern "C" {
     fn rb_init();
@@ -16,6 +19,17 @@ unsafe extern "C" {
     fn rb_capture() -> *mut libc::c_char;
     fn rb_capture_image_file(stem: *const libc::c_char) -> i32;
     fn rb_publish(json: *const libc::c_char) -> i32;
+}
+// A short-lived host schedules native downloads without blocking clipboard polling.
+struct Prefetch {
+    child: std::process::Child,
+    offer_id: String,
+}
+impl Drop for Prefetch {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 pub struct MacBackend {
     pub node: Arc<Node>,
@@ -105,9 +119,34 @@ fn publish(value: serde_json::Value) -> Result<()> {
     );
     Ok(())
 }
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+extern "C" fn shutdown_signal(_: libc::c_int) {
+    SHUTDOWN.store(true, Ordering::Relaxed);
+}
+struct Cleanup(Arc<Node>);
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        self.0.stop.store(true, Ordering::Release);
+        self.0.engine.lock().unwrap().withdraw();
+        unsafe {
+            rb_clear_owned();
+        }
+        if host_command(&["reset"]).is_err() {
+            eprintln!("File Provider cleanup incomplete; retry at next startup");
+        }
+    }
+}
 pub fn run() -> Result<()> {
     unsafe {
         libc::umask(0o077);
+        libc::signal(
+            libc::SIGTERM,
+            shutdown_signal as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            shutdown_signal as *const () as libc::sighandler_t,
+        );
         rb_init();
     }
     let dir = ipc::data_dir()?;
@@ -125,7 +164,13 @@ pub fn run() -> Result<()> {
         }
     }
     let (identity, peers) = crate::app::config::startup(&dir)?;
+    let eager_download = crate::app::config::load(&dir)?["macos_eager_download"]
+        .as_bool()
+        .unwrap_or(false);
     let node = Node::new(identity, peers);
+    let _cleanup = Cleanup(node.clone());
+    // Reset before accepting peers or publishing any new offer. No old transfer survives restart.
+    host_command(&["reset"])?;
     node.engine
         .lock()
         .unwrap()
@@ -147,10 +192,11 @@ pub fn run() -> Result<()> {
     server.spawn(node.clone());
     node.start_sync();
     let mut backend = MacBackend { node: node.clone() };
-    let _ = host_command(&["revoke"]);
     let mut presented: Option<String> = None;
+    let mut pending: Option<Prefetch> = None;
     let mut last_prune = std::time::Instant::now();
-    while !node.stop.load(Ordering::Acquire) {
+    let mut retained = Vec::new();
+    while !node.stop.load(Ordering::Acquire) && !SHUTDOWN.load(Ordering::Relaxed) {
         unsafe {
             rb_pump();
         }
@@ -212,8 +258,18 @@ pub fn run() -> Result<()> {
             .current
             .as_ref()
             .map(|o| o.offer_id.clone());
-        if last_prune.elapsed() >= std::time::Duration::from_secs(10) {
+        let mut live: Vec<_> = node
+            .engine
+            .lock()
+            .unwrap()
+            .retained_offers()
+            .into_iter()
+            .map(|o| o.offer_id)
+            .collect();
+        live.sort();
+        if live != retained || last_prune.elapsed() >= std::time::Duration::from_secs(10) {
             let _ = host_command(&["revoke"]);
+            retained = live;
             last_prune = std::time::Instant::now();
         }
         if presented.is_some() && presented != current_id {
@@ -221,6 +277,16 @@ pub fn run() -> Result<()> {
                 rb_clear_owned();
             }
             presented = None;
+        }
+        if let Some(task) = pending.as_mut() {
+            if current_id.as_ref() != Some(&task.offer_id) {
+                pending = None;
+            } else if let Some(status) = task.child.try_wait()? {
+                pending = None;
+                if !status.success() {
+                    eprintln!("background prefetch failed; files remain available on demand");
+                }
+            }
         }
         let incoming = node.incoming.lock().unwrap().take();
         if let Some((offer, _peer)) = incoming {
@@ -239,13 +305,30 @@ pub fn run() -> Result<()> {
                     } else {
                         presented = Some(offer.offer_id.clone());
                         eprintln!("native file publication complete");
+                        if eager_download {
+                            pending = None;
+                            let host = std::env::var_os("RUSTBOARD_HOST")
+                                .ok_or_else(|| anyhow::anyhow!("RUSTBOARD_HOST required"))?;
+                            match std::process::Command::new(host)
+                                .args(["prefetch", &offer.offer_id])
+                                .stdout(std::process::Stdio::null())
+                                .spawn()
+                            {
+                                Ok(child) => {
+                                    pending = Some(Prefetch {
+                                        child,
+                                        offer_id: offer.offer_id.clone(),
+                                    })
+                                }
+                                Err(_) => eprintln!("background prefetch host unavailable"),
+                            }
+                        }
                     }
                 }
             }
         }
     }
-    node.engine.lock().unwrap().withdraw();
-    let _ = host_command(&["revoke"]);
+    drop(pending);
     Ok(())
 }
 

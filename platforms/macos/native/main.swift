@@ -32,11 +32,11 @@ func saveIndex(_ offer: Offer) throws {
     try writeIndex(offers)
 }
 // Only expired batches are retired. New clipboard contents never evict live files.
-func evictPrevious(_ completion:@escaping(Error?)->Void) {
+func evictPrevious(reset: Bool = false, _ completion:@escaping(Error?)->Void) {
     do {
         let old=try readIndex()
         guard !old.isEmpty else {completion(nil);return}
-        let retained=Set(try fileOffers(profile:profile).map {$0.offer_id})
+        let retained = reset ? Set<String>() : Set(try fileOffers(profile:profile).map {$0.offer_id})
         let expired=old.filter {!retained.contains($0.offer_id)}
         guard !expired.isEmpty else {completion(nil);return}
         let deleted=expired.flatMap {o in (o.content.files ?? []).map {itemID(o,$0)} + ["batch:" + o.offer_id]}
@@ -63,10 +63,40 @@ case "register":NSFileProviderManager.getDomainsWithCompletionHandler {domains,e
     NSFileProviderManager.add(domain,completionHandler:finish)
 }
 case "revoke":evictPrevious(finish)
+case "reset":
+    evictPrevious(reset:true) {error in
+        guard error == nil else {finish(error);return}
+        do {
+            if let manager = NSFileProviderManager(for:domain) {
+                _ = try cleanupPending(in: manager.temporaryDirectoryURL())
+            }
+            finish(nil)
+        } catch {finish(error)}
+    }
 case "remove":NSFileProviderManager.remove(domain,completionHandler:finish)
 case "status":NSFileProviderManager.getDomainsWithCompletionHandler {domains,error in
     print(domains.filter {$0.identifier==domain.identifier}.map {"\($0.identifier.rawValue) hidden=\($0.isHidden)"}.joined(separator:"\n"));finish(error)
 }
+case "prefetch":
+    do {
+        guard let offer = try currentOffer(), offer.offer_id == CommandLine.arguments.dropFirst(2).first,
+              let files = offer.content.files, let manager = NSFileProviderManager(for: domain) else {throw WireError.stale}
+        guard eagerEligible(files) else {finish(nil);break}
+        let group = DispatchGroup(), lock = NSLock(); var failed = false
+        for file in files {
+            group.enter()
+            manager.requestDownloadForItem(withIdentifier: .init(itemID(offer, file))) {error in
+                if let error {
+                    let ns = error as NSError
+                    fputs("prefetch request domain=\(ns.domain) code=\(ns.code)\n", stderr)
+                    lock.lock(); failed = true; lock.unlock()
+                }
+                group.leave()
+            }
+        }
+        // Completion acknowledges scheduling, not completion of the download.
+        group.notify(queue: .main) {finish(failed ? WireError.unavailable : nil)}
+    } catch {finish(error)}
 case "urls":
     do {
         guard let offer=try currentOffer(), offer.offer_id==CommandLine.arguments.dropFirst(2).first,

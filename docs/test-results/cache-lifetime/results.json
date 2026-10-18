@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-19",
+  "installed": true,
+  "windows": "26 unit tests, vectors, clippy, release build passed",
+  "macos": "19 unit tests, vectors, Swift hydration/metadata tests, clippy, full build passed; user signed",
+  "native": {
+    "replacement": "896-byte A hydrated, B replaced it; old A disappeared and only B indexed",
+    "stop": "B materialization and index cleared in 0.75 seconds; start and autostart restored",
+    "crash": "SIGKILL left indexed synthetic materialization; launchd recovery reset index and removed/evicted it",
+    "active_old_batch": "Mac to Windows native COM probe read first 256 bytes, paused beyond data socket idle, new Mac text replaced clipboard, both 4 KiB files completed including second stream acquired after replacement",
+    "release": "Mac snapshots 2 while transfer active, 0 after owner released",
+    "regression_fixed": "Windows received-text publication now drops Agent reference to old IDataObject; active consumer retains its own reference"
+  },
+  "preserved": "identity, peers, eager-download=true, services and login startup",
+  "limits": [
+    "no large-file transfers",
+    "no new Finder GUI or iPhone acceptance in this run",
+    "File Provider lifetime is per fetch, not whole Finder paste",
+    "TCP lost-peer keepalive configured; blackhole-network timing not fault-injected"
+  ]
+}

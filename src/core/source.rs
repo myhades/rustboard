@@ -16,6 +16,9 @@ pub trait ReadAt: Send + Sync {
     fn transfer_guard(&self) -> Result<Option<File>> {
         Ok(None)
     }
+    fn read_background(&self, offset: u64, buffer: &mut [u8]) -> Result<usize> {
+        self.read_at(offset, buffer)
+    }
     fn len(&self) -> u64;
     fn is_empty(&self) -> bool {
         self.len() == 0
@@ -26,7 +29,7 @@ pub trait ReadAt: Send + Sync {
 /// Keeps an open handle, so replacing the pathname cannot redirect the offered file.
 /// Metadata checked before AND after every read; not a cryptographic snapshot.
 pub struct LocalFile {
-    file: Mutex<File>,
+    pub(crate) file: Mutex<File>,
     len: u64,
     modified: SystemTime,
 }
@@ -61,16 +64,6 @@ impl LocalFile {
     }
 }
 impl ReadAt for LocalFile {
-    #[cfg(windows)]
-    fn transfer_guard(&self) -> Result<Option<File>> {
-        let file = self
-            .file
-            .lock()
-            .map_err(|_| anyhow::anyhow!("source lock poisoned"))?;
-        Ok(Some(crate::platform::windows::local_files::transfer_lock(
-            &file,
-        )?))
-    }
     fn len(&self) -> u64 {
         self.len
     }

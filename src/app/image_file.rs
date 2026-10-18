@@ -1,8 +1,12 @@
 //! Clipboard image bytes become an ordinary, offer-owned file. No image wire type.
+#[cfg(not(windows))]
+use crate::core::LocalFile;
 use crate::core::{
-    Content, FileEntry, LocalFile, Offer, ReadAt,
+    Content, FileEntry, Offer, ReadAt,
     engine::{Engine, new_id},
 };
+#[cfg(windows)]
+use crate::platform::windows::local_files::LocalFile;
 use anyhow::{Result, ensure};
 use std::{
     path::{Path, PathBuf},

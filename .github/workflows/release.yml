@@ -102,7 +102,8 @@ jobs:
           fi
           args=()
           if [[ "$RELEASE_TAG" == *-* ]]; then args+=(--prerelease); fi
-          gh release create "$RELEASE_TAG" assets/* --verify-tag --title "Rustboard $RELEASE_TAG" --notes-file docs/RELEASE-NOTES.md "${args[@]}"
+          gh release create "$RELEASE_TAG" assets/* --draft --verify-tag --title "Rustboard $RELEASE_TAG" --notes-file docs/RELEASE-NOTES.md "${args[@]}"
+          gh release edit "$RELEASE_TAG" --draft=false
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: package-manifests
@@ -113,9 +114,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [homebrew, scoop]
+        include:
+          - target: homebrew
+            secret: HOMEBREW_TAP_TOKEN
+          - target: scoop
+            secret: SCOOP_BUCKET_TOKEN
     env:
-      GH_TOKEN: ${{ matrix.target == 'homebrew' && secrets.HOMEBREW_TAP_TOKEN || secrets.SCOOP_BUCKET_TOKEN }}
+      GH_TOKEN: ${{ secrets[matrix.secret] }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Update a release manifest in the owned tap or bucket using scoped GH_TOKEN."""
-import base64, json, subprocess, sys
+import base64, json, os, subprocess, sys
 from pathlib import Path
 path = Path(sys.argv[1])
+if not os.environ.get("GH_TOKEN"):
+    raise SystemExit("Configure the package repository token Secret before distribution")
 target = sys.argv[2]
 locations = {"homebrew": "homebrew-tap/contents/Casks/rustboard.rb", "scoop": "scoop-bucket/contents/bucket/rustboard.json"}
 endpoint = "repos/myhades/" + locations[target]

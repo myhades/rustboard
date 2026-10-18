@@ -32,6 +32,7 @@ fn main() {
     assert!(status.success(), "Swift bridge compilation failed");
     println!("cargo:rustc-link-search=native={}", out.display());
     println!("cargo:rustc-link-search=native=/usr/lib/swift");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     let sdk = std::process::Command::new("xcrun")
         .args(["--show-sdk-path"])
         .output()

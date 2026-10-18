@@ -31,6 +31,8 @@ try {
     $manifest | ConvertTo-Json -Depth 16 | Set-Content $path
     git -C $bucket -c user.name=CI -c user.email=ci@example.invalid commit -am upgrade
     & $scoop update rustboard
+    $installed=Get-Content (Join-Path $env:SCOOP 'apps/rustboard/current/manifest.json') -Raw | ConvertFrom-Json
+    if ($installed.version -ne '999.0.0') {throw 'Scoop did not install the new version'}
     if (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Rustboard -ErrorAction SilentlyContinue) {throw 'Update enabled a disabled service'}
     $after=(Get-Content $config -Raw | ConvertFrom-Json).identity | ConvertTo-Json -Depth 16 -Compress
     if ($after -cne $identity) {throw 'Update changed device identity'}

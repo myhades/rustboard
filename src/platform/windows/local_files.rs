@@ -268,6 +268,13 @@ mod tests {
                 std::fs::rename(&path, &moved).unwrap();
             } else {
                 std::fs::write(&path, b"modified").unwrap();
+                // The contract is metadata-based, not a content hash. Make the
+                // mutation observable even on coarse filesystem clock ticks.
+                let writer = OpenOptions::new().write(true).open(&path).unwrap();
+                let modified = writer.metadata().unwrap().modified().unwrap();
+                writer
+                    .set_modified(modified + std::time::Duration::from_secs(1))
+                    .unwrap();
             }
             assert!(source.read_background(4, &mut [0; 4]).is_err());
             drop(source);

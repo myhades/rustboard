@@ -7,9 +7,14 @@ fn main() {
     for name in ["Bridge.swift", "Security.swift"] {
         println!("cargo:rerun-if-changed={}", native.join(name).display());
     }
+    let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+    let arch = if arch == "aarch64" { "arm64" } else { &arch };
+    let target = format!("{arch}-apple-macos13.0");
     let status = std::process::Command::new("xcrun")
         .args([
             "swiftc",
+            "-target",
+            &target,
             "-swift-version",
             "5",
             "-O",

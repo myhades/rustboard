@@ -1,17 +1,36 @@
-name: Rustboard
+name: CI
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [windows-2022, ubuntu-24.04, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:
+          toolchain: 1.99.1
           components: rustfmt, clippy
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
       - run: cargo fmt --all -- --check
-      - run: cargo test --locked
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo build --release --locked
+      - run: cargo test --all-targets --locked
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: python scripts/check-vectors.py
+      - if: runner.os == 'macOS'
+        run: bash platforms/macos/scripts/test.sh && bash platforms/macos/scripts/build.sh
+      - if: runner.os != 'macOS'
+        run: cargo build --release --locked
+      - if: runner.os == 'Windows'
+        run: ./platforms/windows/scripts/package.ps1 -OutputRoot target/release-assets
+      - if: runner.os == 'Windows'
+        run: |
+          $version=(cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          python scripts/release-manifests.py --windows-only --tag "v$version" --assets target/release-assets --output target/manifests
+      - if: runner.os == 'Windows'
+        run: ./platforms/windows/scripts/test-scoop.ps1

@@ -1,5 +1,5 @@
 cask "rustboard" do
-  version "0.1.0"
+  version "@VERSION@"
   sha256 "@SHA256@"
   url "@URL@"
   name "Rustboard"
@@ -21,6 +21,8 @@ cask "rustboard" do
     sudo: false,
   }
   caveats <<~EOS
+    Development-signed and NOT notarized. Other-Mac File Provider acceptance is pending.
+    macOS may require manual Open Anyway approval.
     Configure listen and pairing after installation: rustboard config
     Apply saved changes: rustboard reload
     Permissions: see docs/INSTALLATION.md for manual System Settings instructions.

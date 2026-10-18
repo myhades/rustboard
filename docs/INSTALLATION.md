@@ -128,66 +128,34 @@ this option makes small files available locally, it does not replace Handoff.
 
 ## Distribution: Homebrew Cask and Scoop
 
-The package managers own their command links: Homebrew links `rustboard`
-in its existing prefix/bin, and Scoop creates the
-`rustboard` shim. Neither package needs to rewrite shell profiles or user PATH.
-Homebrew/Scoop themselves must already be on PATH. Uninstall removes these links,
-the installed executables and login startup, but retains identity, pairing and
-configuration. Do not mix direct and package-manager installations.
-
-Direct Windows `install.ps1` also adds `%LOCALAPPDATA%\Rustboard\bin` to the user
-PATH, broadcasts the environment change, and records ownership. `uninstall.ps1`
-removes only that owned entry; pre-existing entries are preserved. Open a new
-terminal to inherit it. Direct Mac `install.sh` installs links in `~/.local/bin`
-and a marked PATH stanza in `.zprofile` and `.bash_profile`; uninstall removes only
-those links/stanzas. Other shells require their own PATH setup. Both installers
-preserve a previously disabled service during updates. A fresh install without a
-listen argument starts unpaired with networking off: set `listen` in
-`rustboard config`, save and `rustboard reload`, then pair.
-
-### Prepare distribution repositories
-
-Mac (user signs first; package script never signs):
+GitHub Actions builds version-tagged releases and updates the owned tap/bucket.
+See [RELEASING.md](RELEASING.md) for Secrets, build and release instructions.
+Both repositories exist; package manifests appear only after the first successful
+signed release. Do not assume these commands work before that release.
 
 ```sh
-python3 platforms/macos/scripts/package.py --release-url https://github.com/myhades/rustboard/releases/download/v0.1.0-prototype/rustboard-0.1.0-prototype-macos-arm64.tar.gz
-```
-
-This generates the archive, its SHA-256 and `target/macos/homebrew-tap/Casks/rustboard.rb`.
-Without `--release-url` it generates a local-file Cask for local validation only.
-The architecture is checked from the binary; Intel builds use a separate x86_64
-archive. The generated single-architecture Cask declares that restriction.
-The Cask uses the existing vendor installer and requires Python 3.13 for its
-configuration/plist scripts; this is an installer dependency, not an Agent runtime.
-
-Windows:
-
-```powershell
-./platforms/windows/scripts/package.ps1 -OutputRoot target/distribution -ReleaseUrl https://github.com/myhades/rustboard/releases/download/v0.1.0-prototype/rustboard-0.1.0-prototype-windows-x64.zip
-```
-
-This generates the zip, SHA-256 and `target/distribution/scoop-bucket/bucket/rustboard.json`.
-Scoop installation is per-user only. Its update path retains settings and does not
-run the destructive uninstall hook between versions. No admin rights are needed.
-
-Publish the exact archives as release assets, and publish the generated repository
-contents to `myhades/homebrew-tap` and `myhades/scoop-bucket`. Only after those exist:
-
-```sh
-brew tap myhades/tap
 brew install --cask myhades/tap/rustboard
+brew upgrade --cask rustboard
 brew uninstall --cask rustboard
 ```
 
 ```powershell
-scoop bucket add myhades https://github.com/myhades/scoop-bucket
-scoop install myhades/rustboard
+scoop bucket add rustboard https://github.com/myhades/scoop-bucket
+scoop install rustboard/rustboard
+scoop update rustboard
 scoop uninstall rustboard
 ```
 
-These are release instructions, not a claim that the remote taps/assets already
-exist. Checksums are computed from the actual package; never publish placeholder
-checksums or modify an archive after publishing its manifest.
+Homebrew and Scoop must already be installed. Homebrew owns the CLI link in its
+prefix/bin; Scoop owns its shim. Vendor scripts run with PATH modification disabled
+under these managers. Direct script installation still manages its own user PATH.
+Uninstall preserves identity, pairing and configuration. Service enablement survives
+updates. Scoop is per-user only; global installation is rejected.
+
+Windows archives can also be built with
+`./platforms/windows/scripts/package.ps1 -OutputRoot target/distribution`.
+The shared release-manifests.py generator creates metadata using exact asset hashes.
+Never change an archive after its manifest is published.
 
 ### macOS permissions and Open Anyway
 
@@ -207,11 +175,12 @@ or denied, change the permission manually in **System Settings → Privacy & Sec
 There is no separate permissions command. Installers do not strip quarantine,
 disable Gatekeeper, reset TCC or press approval buttons.
 
-For public distribution use Developer ID signing and notarization; **Apple
-Development signing is for development and is not a public-distribution substitute**.
-Open Anyway does not repair invalid signatures or provisioning restrictions. The
-current development build has not been represented as notarized. Signing and
-notarization using personal credentials remain user-operated.
+Apple's supported independent distribution route is Developer ID plus notarization.
+This prototype deliberately uses Apple Development signing **without notarization**.
+Open Anyway does not repair invalid signatures or provisioning restrictions.
+Installation and File Provider operation on another clean Mac remain unverified.
+CI is authorized to sign using the exported identity in GitHub Secrets; no
+notarization credentials or requests are used.
 
 References: [Apple local network privacy](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy),
 [Apple safe app opening](https://support.apple.com/102445),

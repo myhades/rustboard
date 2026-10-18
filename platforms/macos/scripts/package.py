@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Package signed artifacts; never fabricate a release URL/checksum or notarization."""
-import argparse,hashlib,subprocess,tarfile
+import argparse,hashlib,subprocess,tarfile,tomllib
 args=argparse.ArgumentParser()
 args.add_argument("--release-url", help="HTTPS URL of this exact archive after upload")
 options=args.parse_args()
@@ -14,7 +14,8 @@ info=subprocess.run(['codesign','-dv',str(out/'bin/rustboardd')],capture_output=
 if 'TeamIdentifier=not set' in info or 'TeamIdentifier=' not in info:raise SystemExit('Signed Apple-team artifacts required')
 arch=subprocess.check_output(['lipo','-archs',str(out/'bin/rustboardd')],text=True).strip()
 if arch not in ('arm64','x86_64'):raise SystemExit('Expected a single supported architecture')
-archive=out/f'rustboard-0.1.0-prototype-macos-{arch}.tar.gz'
+version=tomllib.loads((root/'Cargo.toml').read_text())['package']['version']
+archive=out/f'rustboard-{version}-macos-{arch}.tar.gz'
 def executable_scripts(info):
     if info.name.endswith('.sh'):info.mode=0o755
     return info
@@ -28,7 +29,7 @@ with archive.open('rb') as stream:
     for block in iter(lambda: stream.read(1024*1024), b''):hasher.update(block)
 digest=hasher.hexdigest()
 archive.with_suffix(archive.suffix+'.sha256').write_text(digest+'  '+archive.name+'\n')
-formula=(root/'platforms/macos/packaging/rustboard.rb.in').read_text().replace('@URL@',options.release_url or archive.as_uri()).replace('@SHA256@',digest).replace('@ARCH@','arm64' if arch=='arm64' else 'intel')
+formula=(root/'platforms/macos/packaging/rustboard.rb.in').read_text().replace('@VERSION@',version).replace('@URL@',options.release_url or archive.as_uri()).replace('@SHA256@',digest).replace('@ARCH@','arm64' if arch=='arm64' else 'intel')
 tap=out/'homebrew-tap/Casks';tap.mkdir(parents=True,exist_ok=True)
 (tap/'rustboard.rb').write_text(formula)
 print(archive);print('SHA256',digest)

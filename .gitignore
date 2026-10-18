@@ -19,7 +19,7 @@ Thumbs.db
 Desktop.ini
 
 # Native macOS build output and per-user Xcode state
-/native/macos/build/
+/platforms/macos/native/build/
 **/DerivedData/
 **/xcuserdata/
 

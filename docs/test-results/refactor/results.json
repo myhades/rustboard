@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-18",
+  "windows": {
+    "tests": "13 core + 1 protocol + 9 app passed",
+    "clippy_release_package_install": "passed"
+  },
+  "macos": {
+    "rust_clippy_release_package_install": "passed",
+    "swift_vectors_hydration_metadata": "passed",
+    "signing": "user-local; verified Team A3443J88T5"
+  },
+  "physical": {
+    "native_unicode_both_directions": "passed",
+    "windows_to_mac_file_provider_bytes": 16,
+    "mac_to_windows_com_bytes": 16,
+    "gui_finder_explorer": "not repeated",
+    "large_network_tests": false
+  },
+  "cleanup": {
+    "branches": "main only on both machines",
+    "extra_worktrees": 0,
+    "mac_historical_test_output": "removed",
+    "windows_historical_test_output": "automatic approval rejected deletion; remains ignored"
+  },
+  "credentials": "existing identity and peer pins preserved"
+}

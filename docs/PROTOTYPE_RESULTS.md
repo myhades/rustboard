@@ -2,7 +2,7 @@
 
 ## Current installed build: transfer lifetime and reload (2026-10-18)
 
-Current-only cleanup below remains included. Both platforms now run bounded retained file batches and the TLS idle reconnect fix; reload restarts with saved settings. Mac→Windows real COM paused-read/text-replacement/late second-stream test and Windows→Mac user Finder paste passed with two 4 KiB fixtures, as did Mac idle presentation cleanup. See docs/TRANSFER_LIFETIME.md and docs/test-results/transfer-lifetime/. This is not Finder mid-copy replacement, Handoff, concurrent cancellation or throughput acceptance. No large files crossed the metered link. Temporary reverse SSH forwarding was used for tests and removed; current reverse routing remains a deployment limitation.
+Current-only cleanup below remains included. Both platforms now run bounded retained file batches and the TLS idle reconnect fix; reload restarts with saved settings. Mac→Windows real COM paused-read/text-replacement/late second-stream test and Windows→Mac user Finder paste passed with two 4 KiB fixtures, as did Mac idle presentation cleanup. See docs/TRANSFER_LIFETIME.md and docs/test-results/transfer-lifetime/. This is not Finder mid-copy replacement, Handoff, concurrent cancellation or throughput acceptance. No large files crossed the metered link. Temporary reverse SSH forwarding was used for tests and removed; a subsequent direct Mac-to-Windows TCP probe passed; the earlier missing-route diagnosis is withdrawn.
 
 ## Current-only cleanup (included)
 

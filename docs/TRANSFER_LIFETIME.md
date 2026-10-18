@@ -45,3 +45,7 @@ Apple documents that the general NSPasteboard automatically participates in Univ
 ## Cleanup and final runtime state
 
 After replacing the tiny-file clipboard with text and waiting for idle expiry, the Mac presented-batches ledger automatically reached zero; evidence: docs/test-results/transfer-lifetime/mac-idle-cleanup.json. This checks native presentation cleanup, not exhaustive disk/handle leak accounting. The temporary SSH reverse tunnel was stopped. Mac must keep its current 10.0.2.2:45452 listener (the old LAN address cannot bind while away); Windows points to that address. Mac's peer endpoint is restored to Windows 192.168.100.6:45451, currently not routable from the Mac. Both services are enabled and identities unchanged. Full bidirectional file use over this hotspot still needs reverse reachability; no persistent tunnel was installed.
+
+## Connectivity correction
+
+A subsequent direct TCP probe from Mac to 192.168.100.6:45451 succeeded in approximately 46 ms, with both installed services responding and no pending configuration restart. The earlier timeout did not establish a missing route; that diagnosis is withdrawn. Current peer addresses point directly at each other, with no SSH forwarding. Earlier forwarded physical-test evidence remains accurately labeled. Handoff has not yet undergone physical acceptance.

@@ -1,5 +1,9 @@
 # Rustboard 续开发记录 — 2026-10-18
 
+## 网络结论更正（2026-10-18）
+
+用户指出 Mac 可直达 Windows 192.168.100.6，重新从 Mac 实测 192.168.100.6:45451 TCP 成功（约46ms）。两端 status 正常、pending_restart=false，配置互指当前地址，无SSH转发。之前端口连接超时只代表当时探测失败，“缺少路由/必须反向转发”属于过度推断，撤回。下文关于当前反向不可达的结论已过时。Handoff尚未真机验收；当前通用剪贴板路径可由用户试验文本，不声称已支持完整桥接。
+
 ## 当前收尾结果（覆盖以下阶段记录）
 
 两端 transfer-lifetime 修复版已安装，Mac 用户签名通过，身份/配对保持。Windows 13 core+1 vector+9 platform、Clippy 通过；Mac 同版空闲 TLS 回归和构建通过（此前完整 Rust/Swift 套件通过）。真机 Mac→Windows 进程外 COM：两个 4 KiB，首读256字节后等待7秒、文本覆盖两端剪贴板，再读完原批次，包括覆盖后才打开第二个流，全部字节校验通过。Windows→Mac 用户 Finder Cmd+V：两份4KiB目标内容与哈希通过。文本替换后 Mac presented-batches 自动归零，清理通过。原始证据 docs/test-results/transfer-lifetime/。

@@ -2,7 +2,7 @@
 #[path = "../../../tests/support/identity.rs"]
 mod test_identity;
 use anyhow::{Context, Result};
-use rustboard_core::{
+use rustboard::core::{
     Content, ReadAt,
     transport::{Node, Peer, RemoteSource},
 };

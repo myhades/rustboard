@@ -5,30 +5,29 @@ Rustboard synchronizes supported clipboard contents between explicitly paired de
 ## Repository
 
 ```text
-crates/
-  core/                 portable protocol, Engine, ReadAt, TLS and peer enrollment
-  app/                  configuration, CLI, Windows/macOS adapters and two bin targets
-platforms/
-  windows/scripts/      install, package and platform acceptance helpers
-  macos/
-    native/             AppKit bridge, minimal host and File Provider extension
-    scripts/            build, signing, install, package and acceptance helpers
-    packaging/          Homebrew template
-scripts/                shared verification scripts
-tests/
-  protocol/             independent protocol vectors
-  support/              test-only pattern sources and fixture identity storage
-tools/rust/             standalone diagnostic/example executables
-docs/                  current documentation, historical reports and evidence
+Cargo.toml              one package, library plus two binary targets
+build.rs                macOS bridge build
+src/
+  lib.rs
+  core/                 portable protocol, Engine, ReadAt and TLS
+  app/                  CLI, configuration and shared application logic
+  platform/windows/     Win32/COM integration
+  platform/macos/       AppKit/IPC integration
+  bin/rustboard.rs       console CLI
+  bin/rustboardd.rs      background Agent
+platforms/              native assets, scripts and packaging by operating system
+tools/rust/             standalone developer tools (Cargo examples)
+tests/                  protocol vectors, integration tests and test-only support
+docs/                   current docs, archived handoffs and evidence
 ```
 
-Ubuntu will use `crates/app/src/ubuntu/` plus `platforms/ubuntu/` when implemented. No empty placeholder backend pretends to support Linux clipboard operations today. The portable core is tested on Ubuntu CI.
+Ubuntu can add `src/platform/ubuntu/` and `platforms/ubuntu/` when implemented; there is no placeholder clipboard backend. Ubuntu CI checks the portable code and unsupported-platform entry points.
 
-## Why two crates
+## Package and executable boundaries
 
-`rustboard-core` has no native API dependencies. It owns validation, arbitration, bounded retained file batches, authenticated TLS and a portable random-access source contract. `rustboard-app` depends on it and owns operating-system permissions, configuration, Keychain/DPAPI, service lifecycle, IPC endpoints and clipboard presentation.
+One package is sufficient for this application. Core and platform responsibilities are ordinary modules; there are no internal path dependencies, facade crates or backend abstraction layers. Native dependencies remain selected with Cargo target conditions and Rust cfg attributes.
 
-One crate is technically possible, but would rely solely on convention to preserve this boundary. Two crates provide compiler-enforced dependency direction and portable tests. Two additional crates for tiny entry points added no such boundary, so both binaries now live in app/src/bin. Keep two executables: a console CLI and a silent Windows GUI-subsystem Agent serve different native purposes.
+The two executables retain their existing roles: a console CLI and a silent Windows GUI-subsystem Agent. They share the same library and configuration implementation. macOS still requires its native File Provider extension and minimal host app.
 
 ## Runtime
 

@@ -6,7 +6,7 @@ mod pattern;
 mod test_identity;
 use anyhow::{Context, Result, ensure};
 use pattern::PatternSource;
-use rustboard_core::{engine::*, transport::*, *};
+use rustboard::core::{engine::*, transport::*, *};
 use std::{
     collections::HashMap,
     net::TcpListener,

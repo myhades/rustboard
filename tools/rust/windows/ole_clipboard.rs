@@ -4,7 +4,7 @@
 mod pattern;
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
-    use rustboard_app::{PresentedFile, windows::virtual_files};
+    use rustboard::platform::{PresentedFile, windows::virtual_files};
     use std::{
         sync::{Arc, atomic::Ordering},
         time::{Duration, Instant},

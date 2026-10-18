@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-18",
+  "package": "rustboard",
+  "binaries": [
+    "rustboard",
+    "rustboardd"
+  ],
+  "windows": {
+    "unit_tests": 22,
+    "protocol_vectors": 1,
+    "fmt_clippy_release": "PASS"
+  },
+  "macos": {
+    "unit_tests": 18,
+    "protocol_vectors": 1,
+    "clippy_release_native_build": "PASS",
+    "signing": "user-local; install verified"
+  },
+  "physical": {
+    "text_both_directions": "PASS",
+    "win_to_mac_file_provider_bytes": 16,
+    "mac_to_win_native_com_bytes": 16,
+    "stream_probe": "early metadata-before-publication attempt failed; after native publication passed",
+    "gui": "not repeated",
+    "large_files": false
+  },
+  "identity_and_peers": "preserved"
+}

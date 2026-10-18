@@ -1,5 +1,5 @@
 use anyhow::{Result, ensure};
-use rustboard_core::{MAX_CHUNK, ReadAt};
+use rustboard::core::{MAX_CHUNK, ReadAt};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Deterministic virtual content for the OLE acceptance harness; no backing file.

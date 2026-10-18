@@ -1,4 +1,4 @@
-use rustboard_core::transport::Identity;
+use rustboard::core::transport::Identity;
 use std::io::Write;
 pub fn load(dir: &std::path::Path) -> anyhow::Result<Identity> {
     let path = dir.join("identity.json");

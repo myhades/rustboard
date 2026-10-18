@@ -2,7 +2,7 @@
 #[path = "../../../tests/support/pattern.rs"]
 mod pattern;
 use pattern::PatternSource;
-use rustboard_core::{engine::*, transport::*, *};
+use rustboard::core::{engine::*, transport::*, *};
 use std::{
     collections::HashMap,
     sync::{Arc, atomic::Ordering},

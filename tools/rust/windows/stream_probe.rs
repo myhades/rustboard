@@ -10,7 +10,7 @@ fn main() -> anyhow::Result<()> {
     unsafe {
         OleInitialize(None)?;
         let object = OleGetClipboard()?;
-        let format = rustboard_app::windows::virtual_files::format(
+        let format = rustboard::platform::windows::virtual_files::format(
             RegisterClipboardFormatW(w!("FileContents")) as u16,
             0,
             TYMED_ISTREAM,

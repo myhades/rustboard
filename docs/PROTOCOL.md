@@ -1,6 +1,6 @@
 # Rustboard current protocol
 
-The executable schema is `crates/core/src/protocol.rs`; independent vectors are `tests/protocol/vectors.json`. JSON field order is irrelevant. Strings are UTF-8. Integer fields are unsigned, except where explicitly stated; Swift must decode u64 as UInt64, not floating point. Unknown fields are rejected in typed messages.
+The executable schema is `src/core/protocol.rs`; independent vectors are `tests/protocol/vectors.json`. JSON field order is irrelevant. Strings are UTF-8. Integer fields are unsigned, except where explicitly stated; Swift must decode u64 as UInt64, not floating point. Unknown fields are rejected in typed messages.
 
 ## Network
 

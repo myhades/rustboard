@@ -2,7 +2,7 @@
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     use anyhow::ensure;
-    use rustboard_app::windows::virtual_files::format;
+    use rustboard::platform::windows::virtual_files::format;
     use windows::{
         Win32::{
             System::{Com::*, DataExchange::RegisterClipboardFormatW, Memory::*, Ole::*},

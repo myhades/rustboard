@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 source platforms/macos/scripts/env.sh
-cargo build --workspace --release --locked
+cargo build --release --locked
 out="$PWD/target/macos"
 app="$out/Rustboard.app"
 provider="$app/Contents/PlugIns/RustboardProvider.appex"

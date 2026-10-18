@@ -402,28 +402,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustboard-app"
+name = "rustboard"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "libc",
- "rustboard-core",
- "serde_json",
- "windows",
- "windows-core",
-]
-
-[[package]]
-name = "rustboard-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
  "rcgen",
  "rustls",
  "serde",
  "serde_json",
  "sha2",
  "uuid",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

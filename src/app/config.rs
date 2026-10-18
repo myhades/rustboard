@@ -138,7 +138,6 @@ pub fn startup(dir: &Path) -> Result<(Identity, Vec<Peer>)> {
 }
 pub fn apply(dir: &Path, engine: &mut Engine) -> Result<Option<SocketAddr>> {
     let value = load(dir)?;
-    engine.paused = false;
     engine.text_only = value["mode"] == "text";
     value["listen"]
         .as_str()

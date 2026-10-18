@@ -9,7 +9,7 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo build --release --locked
 ```
 
-Windows: `platforms/windows/scripts/check.ps1`. macOS: `bash platforms/macos/scripts/test.sh`, then `bash platforms/macos/scripts/build.sh`. Tests write generated reports under test-output, never overwrite committed historical evidence. Full vector hashing/large hydration suites are explicit local tests; do not run large-file network tests without authorization.
+Windows: `platforms/windows/scripts/check.ps1`. macOS: `bash platforms/macos/scripts/test.sh`, then `bash platforms/macos/scripts/build.sh`. Tests write generated reports under test-output, never overwrite committed historical evidence. Full vector hashing (`python3 scripts/check-vectors.py --full-hashes`)/large hydration suites are explicit local tests; do not run large-file network tests without authorization.
 
 ## Standalone diagnostics
 
@@ -26,3 +26,15 @@ No --ole-demo, --text-demo, --sizes or --metrics modes exist in the installed Ag
 ## Repository hygiene
 
 Work on main unless isolation is needed; never discard unrelated work. Preserve installed user config/identity and committed evidence when removing build caches or test-output. All developer/AI handoff documentation belongs under docs. Keep current facts in STATUS.md rather than adding another dated continuation file. Historical reports in archive are not operational instructions.
+
+## Test scope
+
+Default checks use bounded synthetic data. Python vectors hash 4 KiB by default; larger hashes are an explicit fixture-integrity check, not transfer acceptance.
+
+- Core: ordering/replay across restart, retained batch lifetime/capacity, tuple authorization, framing bounds and TLS trust/revocation.
+- Windows: COM descriptor laziness, stream seek/clone/EOF and a two-file transfer across clipboard replacement; DPAPI and source handle sharing.
+- macOS: APFS snapshot lifetime, IPC authorization, Swift wire parsing, hydration failure cleanup and File Provider metadata.
+
+Keep cross-language vector checks: they exercise independent Rust/Swift decoders. Keep the TLS idle-disconnect test despite its six-second wait: it guards the real reconnect-after-clipboard-change regression. A native COM or File Provider test is not redundant with core tests, and is not equivalent to Explorer/Finder GUI acceptance.
+
+Do not add a named scenario unless it changes inputs or exercises a distinct observable behavior. Performance tools, signed live-device checks and large local fixture checks are opt-in; they are not default unit tests. Installed-device identity preservation and bidirectional clipboard checks still require signed on-device acceptance.

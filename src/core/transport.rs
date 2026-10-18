@@ -248,10 +248,6 @@ fn read_v2_data<R: Read>(reader: &mut R, limit: usize) -> Result<DataReply> {
     })
 }
 
-fn read_response(stream: &mut Client) -> Result<Message> {
-    read_frame(stream)
-}
-
 pub fn connect(identity: &Identity, peer: &Peer) -> Result<Client> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut config = ClientConfig::builder_with_provider(provider)
@@ -353,7 +349,6 @@ impl Node {
             IpcOperation::GetOffer => {
                 let mut engine = self.engine.lock().unwrap();
                 engine.expire();
-                ensure!(!engine.paused, "paused");
                 Ok(IpcReply::Other(
                     serde_json::json!({"ok":true,"protocol":1,"offer":engine.current}),
                 ))
@@ -565,6 +560,9 @@ impl Node {
             .peer_certificates()
             .ok_or_else(|| anyhow::anyhow!("no identity"))?[0];
         let pin = fingerprint(cert.as_ref());
+        // A connection reads one file at a time. Keep its platform lock across
+        // chunks; EOF, cancellation, failure or idle disconnect releases it.
+        let mut transfer = None;
         while !self.stop.load(Ordering::Acquire) {
             let message: Message = read_frame(&mut stream)?;
             ensure!(self.trusted(&pin), "peer revoked");
@@ -593,16 +591,12 @@ impl Node {
                 Message::Poll => {
                     let mut engine = self.engine.lock().unwrap();
                     engine.expire();
-                    if engine.paused {
-                        Message::Idle
-                    } else {
-                        engine
-                            .current
-                            .clone()
-                            .filter(|o| o.source_device == engine.device_id)
-                            .map(|offer| Message::Offer { offer })
-                            .unwrap_or(Message::Idle)
-                    }
+                    engine
+                        .current
+                        .clone()
+                        .filter(|o| o.source_device == engine.device_id)
+                        .map(|offer| Message::Offer { offer })
+                        .unwrap_or(Message::Idle)
                 }
                 Message::Offer { offer } => {
                     if self.accept(offer, peer).is_ok() {
@@ -637,6 +631,16 @@ impl Node {
                         {
                             let mut bytes = vec![0; length as usize];
                             let read = (|| -> Result<usize> {
+                                let key = (
+                                    source_device.clone(),
+                                    offer_id.clone(),
+                                    file_id.clone(),
+                                    version.clone(),
+                                );
+                                if transfer.as_ref().is_none_or(|(active, _)| active != &key) {
+                                    transfer = None;
+                                    transfer = Some((key, source.transfer_guard()?));
+                                }
                                 let mut total = 0;
                                 while total < bytes.len() && offset + (total as u64) < source.len()
                                 {
@@ -662,6 +666,9 @@ impl Node {
                             match read {
                                 Ok(n) => {
                                     bytes.truncate(n);
+                                    if offset + n as u64 >= source.len() {
+                                        transfer = None;
+                                    }
                                     Message::Data {
                                         request_id,
                                         offset,
@@ -669,10 +676,13 @@ impl Node {
                                         bytes,
                                     }
                                 }
-                                Err(_) => Message::Error {
-                                    request_id: Some(request_id),
-                                    code: ErrorCode::VersionChanged,
-                                },
+                                Err(_) => {
+                                    transfer = None;
+                                    Message::Error {
+                                        request_id: Some(request_id),
+                                        code: ErrorCode::VersionChanged,
+                                    }
+                                }
                             }
                         }
                         _ => Message::Error {
@@ -682,7 +692,10 @@ impl Node {
                     }
                 }
                 // One bounded request per connection at a time. Cancel retires it between chunks.
-                Message::Cancel { .. } => Message::Ack,
+                Message::Cancel { .. } => {
+                    transfer = None;
+                    Message::Ack
+                }
                 _ => Message::Error {
                     request_id: None,
                     code: ErrorCode::InvalidRequest,
@@ -698,17 +711,14 @@ impl Node {
         let offer = {
             let mut e = self.engine.lock().unwrap();
             e.expire();
-            if e.paused {
-                return Ok(());
-            }
             e.current.clone().filter(|o| o.source_device == e.device_id)
         };
         if let Some(offer) = offer {
             write_frame(&mut stream, &Message::Offer { offer })?;
-            let _: Message = read_response(&mut stream)?;
+            let _: Message = read_frame(&mut stream)?;
         }
         write_frame(&mut stream, &Message::Poll)?;
-        if let Message::Offer { offer } = read_response(&mut stream)? {
+        if let Message::Offer { offer } = read_frame(&mut stream)? {
             self.accept(offer, peer.clone())?;
         }
         Ok(())
@@ -753,10 +763,7 @@ impl ReadAt for RemoteSource {
         self.file.size.unwrap_or(0)
     }
     fn read_at(&self, offset: u64, buffer: &mut [u8]) -> Result<usize> {
-        ensure!(
-            !self.node.stop.load(Ordering::Acquire) && !self.node.engine.lock().unwrap().paused,
-            "cancelled"
-        );
+        ensure!(!self.node.stop.load(Ordering::Acquire), "cancelled");
         ensure!(
             self.node.trusted(&self.peer.fingerprint),
             "revoked or expired"

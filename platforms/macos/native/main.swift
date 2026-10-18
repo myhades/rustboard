@@ -67,8 +67,6 @@ case "remove":NSFileProviderManager.remove(domain,completionHandler:finish)
 case "status":NSFileProviderManager.getDomainsWithCompletionHandler {domains,error in
     print(domains.filter {$0.identifier==domain.identifier}.map {"\($0.identifier.rawValue) hidden=\($0.isHidden)"}.joined(separator:"\n"));finish(error)
 }
-case "ipc-check":
-    do {let offer=try currentOffer();print("IPC ok offer=\(offer != nil)");finish(nil)} catch {finish(error)}
 case "urls":
     do {
         guard let offer=try currentOffer(), offer.offer_id==CommandLine.arguments.dropFirst(2).first,

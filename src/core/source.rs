@@ -6,15 +6,16 @@ use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::Path,
-    sync::{
-        Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    sync::Mutex,
     time::SystemTime,
 };
 
 /// Each call is bounded; implementations must return an error after cancellation/version loss.
 pub trait ReadAt: Send + Sync {
+    /// Held by the serving connection while this file is being read.
+    fn transfer_guard(&self) -> Result<Option<File>> {
+        Ok(None)
+    }
     fn len(&self) -> u64;
     fn is_empty(&self) -> bool {
         self.len() == 0
@@ -28,8 +29,6 @@ pub struct LocalFile {
     file: Mutex<File>,
     len: u64,
     modified: SystemTime,
-    cancelled: AtomicBool,
-    pub bytes_read: AtomicU64,
 }
 impl LocalFile {
     pub fn open(path: &Path) -> Result<Self> {
@@ -48,12 +47,7 @@ impl LocalFile {
             len: metadata.len(),
             modified: metadata.modified()?,
             file: Mutex::new(file),
-            cancelled: AtomicBool::new(false),
-            bytes_read: AtomicU64::new(0),
         })
-    }
-    pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
     }
     pub fn version(&self) -> String {
         format!(
@@ -67,11 +61,20 @@ impl LocalFile {
     }
 }
 impl ReadAt for LocalFile {
+    #[cfg(windows)]
+    fn transfer_guard(&self) -> Result<Option<File>> {
+        let file = self
+            .file
+            .lock()
+            .map_err(|_| anyhow::anyhow!("source lock poisoned"))?;
+        Ok(Some(crate::platform::windows::local_files::transfer_lock(
+            &file,
+        )?))
+    }
     fn len(&self) -> u64 {
         self.len
     }
     fn read_at(&self, offset: u64, buffer: &mut [u8]) -> Result<usize> {
-        ensure!(!self.cancelled.load(Ordering::Acquire), "cancelled");
         ensure!(
             buffer.len() <= MAX_CHUNK && offset <= self.len,
             "invalid range"
@@ -95,7 +98,6 @@ impl ReadAt for LocalFile {
             .min((self.len - offset).min(MAX_CHUNK as u64) as usize);
         let n = file.read(&mut buffer[..limit])?;
         check(&file)?;
-        self.bytes_read.fetch_add(n as u64, Ordering::Relaxed);
         Ok(n)
     }
 }
@@ -114,15 +116,12 @@ mod tests {
         assert!(source.read_at(0, &mut vec![0; MAX_CHUNK + 1]).is_err());
     }
     #[test]
-    fn local_mutation_and_cancel() {
+    fn local_mutation_is_rejected() {
         let path = std::env::temp_dir().join(format!("rustboard-{}", uuid::Uuid::new_v4()));
         std::fs::write(&path, b"original").unwrap();
         let source = LocalFile::open(&path).unwrap();
-        assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
         std::fs::write(&path, b"changed size").unwrap();
         assert!(source.read_at(0, &mut [0; 4]).is_err());
-        source.cancel();
-        assert!(source.read_at(0, &mut []).is_err());
         drop(source);
         std::fs::remove_file(path).unwrap();
     }

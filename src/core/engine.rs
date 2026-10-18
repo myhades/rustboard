@@ -32,7 +32,6 @@ struct FileBatch {
 }
 pub struct Engine {
     pub device_id: String,
-    pub paused: bool,
     pub text_only: bool,
     clock: u64,
     clock_path: Option<PathBuf>,
@@ -45,7 +44,6 @@ impl Engine {
     pub fn new(device_id: String) -> Self {
         Self {
             device_id,
-            paused: false,
             text_only: false,
             clock: 0,
             clock_path: None,
@@ -144,7 +142,6 @@ impl Engine {
     }
     pub fn file_offer(&mut self, id: &str) -> Result<Offer> {
         self.expire();
-        ensure!(!self.paused, "paused");
         Ok(self
             .batches
             .get(id)
@@ -160,7 +157,6 @@ impl Engine {
         version: &str,
     ) -> Result<()> {
         self.expire();
-        ensure!(!self.paused, "paused");
         let batch = self
             .batches
             .get_mut(offer)
@@ -183,7 +179,6 @@ impl Engine {
         content: Content,
         sources: HashMap<String, Arc<dyn ReadAt>>,
     ) -> Result<Offer> {
-        ensure!(!self.paused, "paused");
         ensure!(
             !self.text_only || matches!(content, Content::Text { .. }),
             "text-only mode"
@@ -211,31 +206,7 @@ impl Engine {
         self.current = Some(offer.clone());
         Ok(offer)
     }
-    pub fn files(&mut self, paths: Vec<PathBuf>) -> Result<Offer> {
-        ensure!(paths.len() <= MAX_FILES, "too many files");
-        let mut files = Vec::new();
-        let mut sources: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
-        for path in paths {
-            let source = Arc::new(LocalFile::open(&path)?);
-            let id = new_id();
-            let name = path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .ok_or_else(|| anyhow::anyhow!("invalid filename"))?
-                .to_string();
-            files.push(FileEntry {
-                file_id: id.clone(),
-                relative_path: name,
-                size: Some(source.len()),
-                version: source.version(),
-                media_type: "application/octet-stream".into(),
-            });
-            sources.insert(id, source);
-        }
-        self.local(Content::Files { files }, sources)
-    }
     pub fn accept(&mut self, offer: Offer, authenticated_device: &str) -> Result<bool> {
-        ensure!(!self.paused, "paused");
         offer.validate(now_ms())?;
         ensure!(
             offer.source_device == authenticated_device && offer.source_device != self.device_id,
@@ -401,10 +372,17 @@ mod tests {
         assert!(e.retained_offers().is_empty());
     }
     #[test]
-    fn old_integer_clock_is_rejected() {
+    fn malformed_clock_is_rejected_without_overwrite() {
         let path = std::env::temp_dir().join(new_id());
-        std::fs::write(&path, b"123").unwrap();
-        assert!(Engine::new(new_id()).persist_clock(path.clone()).is_err());
+        for bytes in [
+            b"123".as_slice(),
+            b"{",
+            br#"{"clock":1,"watermark":null,"unexpected":true}"#,
+        ] {
+            std::fs::write(&path, bytes).unwrap();
+            assert!(Engine::new(new_id()).persist_clock(path.clone()).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
         std::fs::remove_file(path).unwrap();
     }
     #[test]
@@ -421,9 +399,22 @@ mod tests {
                 HashMap::new(),
             )
             .unwrap();
+        let mut remote = Engine::new(new_id());
+        let mut incoming = remote
+            .local(
+                Content::Text {
+                    text: "remote".into(),
+                },
+                HashMap::new(),
+            )
+            .unwrap();
+        incoming.event_sequence = first.event_sequence + 1;
+        assert!(a.accept(incoming.clone(), &remote.device_id).unwrap());
         drop(a);
         let mut a = Engine::new(id);
         a.persist_clock(path.clone()).unwrap();
+        assert!(!a.accept(incoming.clone(), &remote.device_id).unwrap());
+        assert!(a.current.is_none());
         let second = a
             .local(
                 Content::Text {
@@ -432,8 +423,54 @@ mod tests {
                 HashMap::new(),
             )
             .unwrap();
-        assert!(second.event_sequence > first.event_sequence);
+        assert!(second.event_sequence > incoming.event_sequence);
         std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn invalid_file_tuple_cannot_read_or_renew_batch() {
+        let mut e = Engine::new(new_id());
+        let offer = batch(&mut e);
+        let Content::Files { files } = &offer.content else {
+            panic!()
+        };
+        for tuple in [
+            (
+                new_id(),
+                offer.offer_id.clone(),
+                files[0].file_id.clone(),
+                "v".to_owned(),
+            ),
+            (
+                e.device_id.clone(),
+                new_id(),
+                files[0].file_id.clone(),
+                "v".to_owned(),
+            ),
+            (
+                e.device_id.clone(),
+                offer.offer_id.clone(),
+                new_id(),
+                "v".to_owned(),
+            ),
+            (
+                e.device_id.clone(),
+                offer.offer_id.clone(),
+                files[0].file_id.clone(),
+                "wrong".to_owned(),
+            ),
+        ] {
+            assert!(e.source(&tuple.0, &tuple.1, &tuple.2, &tuple.3).is_err());
+            assert!(e.batches[&offer.offer_id].active_until.is_none());
+        }
+        assert!(
+            e.source(
+                &e.device_id.clone(),
+                &offer.offer_id,
+                &files[0].file_id,
+                "v"
+            )
+            .is_ok()
+        );
     }
     #[test]
     fn deterministic_conflict_and_expiration() {

@@ -33,7 +33,7 @@ import CryptoKit
         let folder=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:false)
         defer {try? FileManager.default.removeItem(at:folder)}
-        for mode in ["success","clipboard_replaced","cancel","disconnect","offset","request_id","early_eof","late_eof","short","version","restart","commit_failure"] {
+        for mode in ["success","cancel","disconnect","offset","request_id","early_eof","late_eof","short","version","restart","commit_failure"] {
             var reads=0;var cancels=0
             let progress=Progress(totalUnitCount:Int64(file.size!))
             let url=folder.appendingPathComponent(mode)
@@ -55,12 +55,12 @@ import CryptoKit
             }
             do {
                 try hydrate(offer,file,to:url,progress:progress,call:call,commit: {_ in if mode == "commit_failure" {throw WireError.unavailable}})
-                precondition(mode == "success" || mode == "clipboard_replaced")
+                precondition(mode == "success")
                 let bytes=try Data(contentsOf:url)
                 precondition(bytes.count==131073 && bytes.enumerated().allSatisfy {$0.element==UInt8($0.offset%251)})
                 let attrs=try FileManager.default.attributesOfItem(atPath:url.path)
                 precondition((attrs[.posixPermissions] as! NSNumber).intValue==0o600)
-            } catch {precondition(mode != "success" && mode != "clipboard_replaced");precondition(!FileManager.default.fileExists(atPath:url.path));precondition(cancels==1)}
+            } catch {precondition(mode != "success");precondition(!FileManager.default.fileExists(atPath:url.path));precondition(cancels==1)}
             print("PASS hydrate \(mode) reads=\(reads) cancels=\(cancels)")
         }
         let pending = folder.appendingPathComponent("rb-pending-fixture")

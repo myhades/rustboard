@@ -193,7 +193,7 @@ fn update(window: HWND) {
                     STATE.with_borrow(|s| {
                         if let Some(node) = &s.node {
                             let mut engine = node.engine.lock().unwrap();
-                            if engine.paused || engine.text_only {
+                            if engine.text_only {
                                 engine.clear_clipboard();
                                 return;
                             }
@@ -356,7 +356,7 @@ fn tick(window: HWND) {
     let expired = {
         let mut e = node.engine.lock().unwrap();
         e.expire();
-        e.paused || e.current.is_none()
+        e.current.is_none()
     };
     if expired {
         STATE.with_borrow_mut(|s| {

@@ -104,7 +104,7 @@ mod tests {
         engine.withdraw();
         assert!(!path.exists());
         std::fs::write(&path, b"synthetic encoded bytes").unwrap();
-        engine.paused = true;
+        engine.text_only = true;
         assert!(offer(&mut engine, path.clone()).is_err());
         assert!(!path.exists());
         std::fs::remove_dir(&dir).unwrap();

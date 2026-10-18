@@ -170,7 +170,7 @@ pub fn run() -> Result<()> {
                     Default::default(),
                 ),
                 Some("image") => {
-                    if engine.paused || engine.text_only {
+                    if engine.text_only {
                         engine.clear_clipboard();
                         continue;
                     }

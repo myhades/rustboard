@@ -19,7 +19,7 @@
   },
   "read": {"type":"read","request_id":7,"source_device":"00000000-0000-0000-0000-000000000001","offer_id":"00000000-0000-0000-0000-000000000002","file_id":"00000000-0000-0000-0000-000000000003","version":"pattern-v1","offset":249,"length":5},
   "data": {"type":"data","request_id":7,"offset":249,"bytes":[249,250,0,1,2],"eof":false},
-  "ipc": {"protocol":1,"request":{"type":"read","request_id":7,"offer_id":"00000000-0000-0000-0000-000000000002","file_id":"00000000-0000-0000-0000-000000000003","version":"pattern-v1","offset":249,"length":5}},
+  "ipc": {"protocol":1,"request":{"type":"read_binary","request_id":7,"offer_id":"00000000-0000-0000-0000-000000000002","file_id":"00000000-0000-0000-0000-000000000003","version":"pattern-v1","offset":249,"length":5}},
   "pattern": "byte at offset i is i modulo 251",
   "hashes": [
     {"size":4096,"sha256":"d67c656e01756650d77717b0839985a056ec28ffe174601d690fc407a2ceffca"},

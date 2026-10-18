@@ -209,7 +209,7 @@ fn update(window: HWND) {
                         if let Some(node) = &s.node {
                             let mut engine = node.engine.lock().unwrap();
                             if super::local_files::offer(&mut engine, paths.clone()).is_err() {
-                                engine.withdraw();
+                                engine.clear_clipboard();
                                 eprintln!("clipboard file offer rejected");
                             }
                         }
@@ -231,14 +231,14 @@ fn update(window: HWND) {
                         if let Some(node) = &s.node {
                             let mut engine = node.engine.lock().unwrap();
                             if engine.paused || engine.text_only {
-                                engine.withdraw();
+                                engine.clear_clipboard();
                                 return;
                             }
                             let result = image
                                 .save(&s.images)
                                 .and_then(|path| crate::image_file::offer(&mut engine, path));
                             if result.is_err() {
-                                engine.withdraw();
+                                engine.clear_clipboard();
                                 eprintln!("clipboard image-to-file rejected");
                             } else {
                                 eprintln!("clipboard image published as ordinary file");
@@ -249,7 +249,7 @@ fn update(window: HWND) {
                 Captured::Unsupported => {
                     STATE.with_borrow(|s| {
                         if let Some(node) = &s.node {
-                            node.engine.lock().unwrap().withdraw();
+                            node.engine.lock().unwrap().clear_clipboard();
                         }
                     });
                     // Inspect OLE formats without materializing FileContents.

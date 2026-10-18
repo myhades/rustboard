@@ -18,6 +18,6 @@ class Rustboard < Formula
     EOS
   end
   test do
-    assert_match "protocol=1", shell_output("#{bin}/rustboard version")
+    assert_match "rustboard 0.1.0", shell_output("#{bin}/rustboard --version")
   end
 end

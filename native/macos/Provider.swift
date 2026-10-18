@@ -9,9 +9,9 @@ final class Item: NSObject, NSFileProviderItem {
     let offer: Offer?
     let file: FileEntry?
     init(_ offer: Offer? = nil, _ file: FileEntry? = nil) {self.offer=offer; self.file=file}
-    var itemIdentifier: NSFileProviderItemIdentifier {guard let offer, let file else {return .rootContainer}; return .init(itemID(offer,file))}
-    var parentItemIdentifier: NSFileProviderItemIdentifier {.rootContainer}
-    var filename: String {file?.relative_path ?? "Rustboard"}
+    var itemIdentifier: NSFileProviderItemIdentifier {guard let offer else {return .rootContainer}; guard let file else {return .init("batch:" + offer.offer_id)}; return .init(itemID(offer,file))}
+    var parentItemIdentifier: NSFileProviderItemIdentifier {guard let offer, file != nil else {return .rootContainer}; return .init("batch:" + offer.offer_id)}
+    var filename: String {file?.relative_path ?? offer?.offer_id ?? "Rustboard"}
     var contentType: UTType {file == nil ? .folder : (UTType(filenameExtension: (filename as NSString).pathExtension) ?? .data)}
     // Finder propagates uchg for read-only capabilities and fails repeated copy.
     // This is an export namespace: content write-back remains unsupported below.
@@ -21,10 +21,24 @@ final class Item: NSObject, NSFileProviderItem {
     var documentSize: NSNumber? {file?.size.map {NSNumber(value:$0)}}
     var itemVersion: NSFileProviderItemVersion { .init(contentVersion: Data((file?.version ?? "root").utf8), metadataVersion: Data((offer?.offer_id ?? "root").utf8)) }
 }
-func items(profile: String) throws -> [Item] {guard let offer=try currentOffer(profile: profile), let files=offer.content.files else {return []};return files.map {Item(offer,$0)}}
+func items(profile: String, parent: NSFileProviderItemIdentifier = .rootContainer) throws -> [Item] {
+    let offers = try fileOffers(profile: profile)
+    if parent == .rootContainer {return offers.map {Item($0)}}
+    if parent == .workingSet {return offers.flatMap {o in [Item(o)] + (o.content.files ?? []).map {Item(o,$0)}}}
+    guard parent.rawValue.hasPrefix("batch:"), let offer = offers.first(where: {"batch:" + $0.offer_id == parent.rawValue}) else {throw NSFileProviderError(.noSuchItem)}
+    return (offer.content.files ?? []).map {Item(offer,$0)}
+}
 func lookup(_ id: NSFileProviderItemIdentifier, profile: String) throws -> Item {
     if id == .rootContainer {return Item()}
-    guard let item=try items(profile: profile).first(where: {$0.itemIdentifier==id}) else {throw NSFileProviderError(.noSuchItem)};return item
+    let parts=id.rawValue.split(separator:":")
+    let offerID: String
+    if parts.count == 2 && parts[0] == "batch" {offerID=String(parts[1])}
+    else if parts.count == 5 && parts[0] == "rb1" {offerID=String(parts[2])}
+    else {throw NSFileProviderError(.noSuchItem)}
+    guard let offer=try fileOffer(offerID, profile:profile) else {throw NSFileProviderError(.noSuchItem)}
+    if parts.count == 2 {return Item(offer)}
+    guard let file=offer.content.files?.first(where:{itemID(offer,$0)==id.rawValue}) else {throw NSFileProviderError(.noSuchItem)}
+    return Item(offer,file)
 }
 // File Provider vendor tokens must be <=500 bytes. Deletion identities live
 // in the private retirement ledger; the anchor is always a 32-byte digest.
@@ -35,21 +49,28 @@ func snapshotAnchor(_ items: [Item]) throws -> NSFileProviderSyncAnchor {
 }
 final class Enumerator: NSObject, NSFileProviderEnumerator {
     let profile: String
-    init(profile: String) {self.profile=profile}
+    let parent: NSFileProviderItemIdentifier
+    init(profile: String, parent: NSFileProviderItemIdentifier) {self.profile=profile;self.parent=parent}
     func invalidate() {}
     func enumerateItems(for observer:NSFileProviderEnumerationObserver,startingAt page:NSFileProviderPage) {
-        do {observer.didEnumerate(try items(profile: profile));observer.finishEnumerating(upTo:nil)} catch {observer.finishEnumeratingWithError(error)}
+        do {observer.didEnumerate(try items(profile: profile, parent: parent));observer.finishEnumerating(upTo:nil)} catch {observer.finishEnumeratingWithError(error)}
     }
     func enumerateChanges(for observer:NSFileProviderChangeObserver,from anchor:NSFileProviderSyncAnchor) {
         do {
             guard anchor.rawValue.count == 32 || (anchor.rawValue.count == 9 && anchor.rawValue.first == 1) else {
                 throw NSFileProviderError(.syncAnchorExpired)
             }
-            let current = (try? items(profile: profile)) ?? []
+            let current = try items(profile: profile, parent: parent)
             let ids = Set(current.map {$0.itemIdentifier.rawValue})
             let acknowledged: UInt64? = anchor.rawValue.count == 9 ? anchor.rawValue.dropFirst().reduce(UInt64(0)) {($0 << 8) | UInt64($1)} : nil
-            let (retired, generation) = try retiredItems(profile: profile, acknowledged: acknowledged)
-            let deleted = Set(retired).subtracting(ids)
+            let (retired, generation) = try retiredItems(profile: profile, acknowledged: parent == .workingSet ? acknowledged : nil)
+            let deleted = Set(retired.filter { id in
+                if parent == .workingSet {return true}
+                if parent == .rootContainer {return id.hasPrefix("batch:")}
+                let offerID=String(parent.rawValue.dropFirst("batch:".count))
+                let parts=id.split(separator:":")
+                return parts.count == 5 && String(parts[2]) == offerID
+            }).subtracting(ids)
             observer.didDeleteItems(withIdentifiers: deleted.map {NSFileProviderItemIdentifier($0)})
             observer.didUpdate(current)
             var token = Data([1])
@@ -58,7 +79,7 @@ final class Enumerator: NSObject, NSFileProviderEnumerator {
         } catch {observer.finishEnumeratingWithError(error)}
     }
     func currentSyncAnchor(completionHandler:@escaping(NSFileProviderSyncAnchor?)->Void) {
-        completionHandler(try? snapshotAnchor((try? items(profile: profile)) ?? []))
+        completionHandler(try? snapshotAnchor((try? items(profile: profile, parent: parent)) ?? []))
     }
 }
 final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
@@ -109,7 +130,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         };return progress
     }
     func enumerator(for identifier:NSFileProviderItemIdentifier,request:NSFileProviderRequest)throws->NSFileProviderEnumerator {
-        guard identifier == .rootContainer || identifier == .workingSet else {throw NSFileProviderError(.noSuchItem)};return Enumerator(profile: profile)
+        guard identifier == .rootContainer || identifier == .workingSet || identifier.rawValue.hasPrefix("batch:") else {throw NSFileProviderError(.noSuchItem)};return Enumerator(profile: profile, parent: identifier)
     }
     func createItem(basedOn itemTemplate:NSFileProviderItem,fields:NSFileProviderItemFields,contents url:URL?,options:NSFileProviderCreateItemOptions,request:NSFileProviderRequest,completionHandler:@escaping(NSFileProviderItem?,NSFileProviderItemFields,Bool,Error?)->Void)->Progress {completionHandler(nil,[],false,CocoaError(.featureUnsupported));return Progress()}
     func modifyItem(_ item:NSFileProviderItem,baseVersion version:NSFileProviderItemVersion,changedFields:NSFileProviderItemFields,contents newContents:URL?,options:NSFileProviderModifyItemOptions,request:NSFileProviderRequest,completionHandler:@escaping(NSFileProviderItem?,NSFileProviderItemFields,Bool,Error?)->Void)->Progress {completionHandler(nil,[],false,CocoaError(.featureUnsupported));return Progress()}

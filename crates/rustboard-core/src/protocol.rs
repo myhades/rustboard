@@ -20,15 +20,11 @@ pub enum IpcOperation {
         args: Vec<String>,
     },
     GetOffer,
-    ReadBinary {
-        request_id: u64,
+    GetFileOffer {
         offer_id: String,
-        file_id: String,
-        version: String,
-        offset: u64,
-        length: u32,
     },
-    Read {
+    GetFileOffers,
+    ReadBinary {
         request_id: u64,
         offer_id: String,
         file_id: String,

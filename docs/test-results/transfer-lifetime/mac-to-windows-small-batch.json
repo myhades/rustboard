@@ -1,0 +1,6 @@
+{
+  "exit_code": 0,
+  "output": "PASS native IDataObject/IStream: two 4 KiB files, 8192 bytes verified; second stream opened after replacement\n",
+  "text_on_mac": "PASS expected synthetic Unicode text on AppKit pasteboard\n",
+  "elapsed_seconds": 16.376904700009618
+}

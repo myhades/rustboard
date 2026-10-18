@@ -35,7 +35,7 @@ pub fn load(dir: &Path) -> Result<Value> {
     let value = if path.exists() {
         read_json(&path)?
     } else {
-        json!({"listen":null,"mode":"all"})
+        json!({"schema":2,"listen":null,"mode":"all","peers":[],"identity":null})
     };
     validate(&value)?;
     Ok(value)
@@ -45,15 +45,14 @@ fn validate(value: &Value) -> Result<()> {
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("config must be an object"))?;
     ensure!(
-        object.keys().all(
-            |k| ["schema", "listen", "mode", "paused", "peers", "identity"].contains(&k.as_str())
-        ),
+        object
+            .keys()
+            .all(|k| ["schema", "listen", "mode", "peers", "identity"].contains(&k.as_str())),
         "unknown config key"
     );
     ensure!(
-        (value["paused"].is_null() || value["paused"].is_boolean())
-            && matches!(value["mode"].as_str(), Some("text" | "all")),
-        "invalid mode/paused config"
+        matches!(value["mode"].as_str(), Some("text" | "all")),
+        "invalid mode config"
     );
     if !value["listen"].is_null() {
         let _: SocketAddr = value["listen"]
@@ -61,15 +60,17 @@ fn validate(value: &Value) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("invalid listen"))?
             .parse()?;
     }
-    if !value["schema"].is_null() {
-        ensure!(
-            value["schema"] == 2 && value["identity"].is_object() && value["peers"].is_array(),
-            "invalid config schema/identity/peers"
-        );
-    }
-    if !value["peers"].is_null() {
-        peers(value)?;
-    }
+    ensure!(
+        value["schema"] == 2 && object.contains_key("identity") && value["peers"].is_array(),
+        "expected current schema-2 config"
+    );
+    ensure!(
+        value["identity"].is_object()
+            || (value["identity"].is_null() && value["peers"].as_array().unwrap().is_empty()),
+        "invalid identity"
+    );
+    peers(value)?;
+
     Ok(())
 }
 fn peers(value: &Value) -> Result<Vec<Peer>> {
@@ -118,32 +119,12 @@ pub fn startup(dir: &Path) -> Result<(Identity, Vec<Peer>)> {
     let _guard = WRITE_LOCK.lock().unwrap();
     let _file_guard = file_lock(dir)?;
     let mut value = load(dir)?;
-    if value["schema"].is_null() {
-        ensure!(
-            value["identity"].is_null(),
-            "legacy config must not contain identity"
-        );
-        let identity = if dir.join("identity.json").exists() {
-            let legacy: Identity = serde_json::from_value(read_json(&dir.join("identity.json"))?)?;
-            Identity::from_parts(legacy.cert.clone(), legacy.private_key_der().to_vec())?
-        } else {
-            Identity::generate()?
-        };
-        if value["peers"].is_null() {
-            value["peers"] = if dir.join("peers.json").exists() {
-                read_json(&dir.join("peers.json"))?
-            } else {
-                json!([])
-            };
-        }
-        peers(&value)?;
+    // Explicit empty current-format identity initializes a fresh installation only.
+    // Existing protected credentials are never replaced on a read/decrypt error.
+    if value["identity"].is_null() {
+        let identity = Identity::generate()?;
         value["identity"] = json!({"certificate_der":identity.cert,"private_key":credential::store(&identity.pin(),identity.private_key_der())?});
-        value["schema"] = 2.into();
-        let restored = restore(&value)?;
-        ensure!(
-            restored.pin() == identity.pin(),
-            "identity migration mismatch"
-        );
+        restore(&value)?;
         write(dir, &value)?;
     }
     let identity = restore(&value)?;
@@ -152,21 +133,6 @@ pub fn startup(dir: &Path) -> Result<(Identity, Vec<Peer>)> {
         peers.iter().all(|p| p.fingerprint != identity.pin()),
         "cannot pair self"
     );
-    // Crash after config commit is recoverable. Only remove the verified legacy identity.
-    if dir.join("identity.json").exists() {
-        let old: Identity = serde_json::from_value(read_json(&dir.join("identity.json"))?)?;
-        ensure!(
-            old.cert == identity.cert && old.private_key_der() == identity.private_key_der(),
-            "legacy identity conflicts with protected config; retained"
-        );
-        std::fs::remove_file(dir.join("identity.json"))?;
-    }
-    if dir.join("peers.json").exists() {
-        std::fs::remove_file(dir.join("peers.json"))?;
-    }
-    if value.as_object_mut().unwrap().remove("paused").is_some() {
-        write(dir, &value)?;
-    }
     let _ = ACTIVE.set(value);
     Ok((identity, peers))
 }
@@ -180,51 +146,17 @@ pub fn apply(dir: &Path, engine: &mut Engine) -> Result<Option<SocketAddr>> {
         .transpose()
         .map_err(Into::into)
 }
-/// CLI writes desired config only; running peers/mode remain unchanged until restart.
-pub fn update(dir: &Path, own_pin: &str, args: &[String]) -> Result<Value> {
+/// Persist a mutually confirmed peer; active connections change only on restart.
+pub fn save_peer(dir: &Path, own_pin: &str, peer: Peer) -> Result<()> {
     let _guard = WRITE_LOCK.lock().unwrap();
     let _file_guard = file_lock(dir)?;
     let mut value = load(dir)?;
-    ensure!(
-        value["schema"] == 2,
-        "restart Agent to migrate config first"
-    );
-    match args[0].as_str() {
-        "mode" => {
-            ensure!(
-                args.len() == 2 && ["text", "all"].contains(&args[1].as_str()),
-                "mode text|all"
-            );
-            value["mode"] = args[1].clone().into();
-        }
-        "pair" => {
-            ensure!(
-                args.len() == 4 && args[2] == "--fingerprint",
-                "pair <IP:port> --fingerprint <SHA256>; restart BOTH Agents"
-            );
-            let pin = args[3].to_lowercase();
-            device_from_pin(&pin)?;
-            ensure!(pin != own_pin, "cannot pair self");
-            let mut next = peers(&value)?;
-            next.retain(|p| p.fingerprint != pin);
-            next.push(Peer {
-                address: args[1].parse()?,
-                fingerprint: pin,
-            });
-            value["peers"] = serde_json::to_value(next)?;
-        }
-        "unpair" => {
-            ensure!(args.len() == 2, "unpair <device_id or fingerprint>");
-            let mut next = peers(&value)?;
-            next.retain(|p| p.device() != args[1] && p.fingerprint != args[1]);
-            value["peers"] = serde_json::to_value(next)?;
-        }
-        _ => anyhow::bail!("unknown config command"),
-    }
-    write(dir, &value)?;
-    Ok(
-        json!({"ok":true,"restart_required":true,"message":"Configuration saved; restart Agent to apply. Existing connections remain active until restart."}),
-    )
+    ensure!(peer.fingerprint != own_pin, "cannot pair self");
+    let mut next = peers(&value)?;
+    next.retain(|p| p.fingerprint != peer.fingerprint);
+    next.push(peer);
+    value["peers"] = serde_json::to_value(next)?;
+    write(dir, &value)
 }
 
 pub fn status(node: &rustboard_core::transport::Node, dir: &Path) -> Result<Value> {
@@ -252,40 +184,23 @@ pub fn unpair_address(dir: &Path, address: std::net::SocketAddr) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn migration_preserves_identity_and_restart_applies_peer_edits() {
+    fn protected_identity_persists_and_corruption_fails() {
         let dir = std::env::temp_dir().join(rustboard_core::engine::new_id());
         std::fs::create_dir(&dir).unwrap();
-        let old = Identity::generate().unwrap();
-        std::fs::write(dir.join("identity.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+        let (identity, _) = startup(&dir).unwrap();
+        assert_eq!(startup(&dir).unwrap().0.pin(), identity.pin());
         let remote = Identity::generate().unwrap();
-        assert!(Identity::from_parts(old.cert.clone(), remote.private_key_der().to_vec()).is_err());
+        assert!(
+            Identity::from_parts(identity.cert.clone(), remote.private_key_der().to_vec()).is_err()
+        );
         let peer = Peer {
             address: "127.0.0.1:4567".parse().unwrap(),
             fingerprint: remote.pin(),
         };
-        std::fs::write(
-            dir.join("peers.json"),
-            serde_json::to_vec(&vec![peer]).unwrap(),
-        )
-        .unwrap();
-        let (identity, active) = startup(&dir).unwrap();
-        assert_eq!(old.pin(), identity.pin());
-        assert_eq!(active.len(), 1);
-        assert!(!dir.join("identity.json").exists() && !dir.join("peers.json").exists());
-        // Simulate a crash after config commit but before legacy cleanup.
-        std::fs::write(dir.join("identity.json"), serde_json::to_vec(&old).unwrap()).unwrap();
-        std::fs::write(dir.join("peers.json"), b"[]").unwrap();
+        save_peer(&dir, &identity.pin(), peer.clone()).unwrap();
         assert_eq!(startup(&dir).unwrap().1.len(), 1);
-        assert!(!dir.join("identity.json").exists());
-        assert!(!load(&dir).unwrap()["identity"]["private_key"]["blob"].is_null());
-        update(&dir, &identity.pin(), &["unpair".into(), remote.pin()]).unwrap();
-        assert_eq!(active.len(), 1);
+        unpair_address(&dir, peer.address).unwrap();
         assert!(startup(&dir).unwrap().1.is_empty());
-        update(&dir, &identity.pin(), &["mode".into(), "text".into()]).unwrap();
-        let mut engine = Engine::new(identity.device());
-        apply(&dir, &mut engine).unwrap();
-        assert!(engine.text_only);
-        assert!(!engine.paused);
         let mut broken = load(&dir).unwrap();
         broken["identity"]["private_key"]["blob"] = json!([1, 2, 3]);
         write(&dir, &broken).unwrap();
@@ -300,14 +215,15 @@ mod validation_tests {
     use super::*;
     #[test]
     fn malformed_settings_and_duplicate_peers_are_rejected() {
-        let mut value = json!({"listen":"127.0.0.1:45451","mode":"all","paused":false,"peers":[]});
+        let mut value =
+            json!({"schema":2,"listen":"127.0.0.1:45451","mode":"all","peers":[],"identity":{}});
         validate(&value).unwrap();
         value["listen"] = "not-an-address".into();
         assert!(validate(&value).is_err());
         value["listen"] = Value::Null;
-        value["schema"] = 2.into();
+        value["schema"] = 1.into();
         assert!(validate(&value).is_err());
-        value["identity"] = json!({});
+        value["schema"] = 2.into();
         let peer = json!({"address":"127.0.0.1:45452","fingerprint":"a".repeat(64)});
         value["peers"] = json!([peer.clone(), peer]);
         assert!(validate(&value).is_err());

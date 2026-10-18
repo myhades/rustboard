@@ -2,7 +2,7 @@
 
 ## Responsibility boundaries
 
-`rustboard-core`: serde protocol v1, bounded frames, Offer validation and deterministic arbitration, handle-backed and deterministic ReadAt sources, TLS 1.3 transport, peer authorization, portable File Provider IPC operations. No Win32, COM, Swift, AppKit or FUSE types.
+`rustboard-core`: current serde control/metadata schema, bounded frames, Offer validation and deterministic arbitration, handle-backed and deterministic ReadAt sources, TLS 1.3 transport, peer authorization, portable File Provider IPC operations. No Win32, COM, Swift, AppKit or FUSE types.
 
 `rustboard-platform`: `ClipboardBackend` (text publishing) and `FilePresentationBackend` (native file exposure). `PresentedFile` holds a portable `Arc<dyn ReadAt>`. Native event delivery is intentionally platform-specific, rather than hidden behind a universal polling abstraction.
 
@@ -22,13 +22,13 @@ IStream reads run in the OLE apartment and may block on a remote source. Socket 
 
 Local clipboard event → native capture → portable Engine.local → metadata-only TLS Offer. The source registry maps opaque file IDs to already opened handles. Absolute paths are never sent.
 
-Authenticated remote Offer → validate IDs/path/lifetime → Lamport comparison → latest native queue → text clipboard or virtual-file data object. Requesting descriptors only allocates bounded metadata. Explorer requests lindex N, obtains a fresh IStream, then Read/Seek invokes RemoteSource. Reads use a separate TLS connection from offer polling and retain that connection for subsequent chunks. Each source call is at most64 KiB; JSON Data payloads are bounded by the1 MiB frame cap.
+Authenticated remote Offer → validate IDs/path/lifetime → Lamport comparison → latest native queue → text clipboard or virtual-file data object. Requesting descriptors only allocates bounded metadata. Explorer requests lindex N, obtains a fresh IStream, then Read/Seek invokes RemoteSource. Reads use a separate TLS connection from offer polling and retain that connection for subsequent chunks. Each source call is at most64 KiB; Binary Data is bounded to 4 MiB on TLS and 64 KiB on local IPC; control JSON is capped at 1 MiB. See docs/TRANSPORT_V2.md.
 
 No content cache is currently used. Repeated paste rereads the source. This trades bandwidth for simple invalidation and avoids hidden disk usage. Transient connection failure clears the cached connection; a later read can reconnect, but a failed Explorer operation is not automatically restarted.
 
 ## Lifetimes
 
-Default Offer lifetime is10 minutes; accepted protocol lifetimes cannot exceed24 hours. Engine expires the current source registry; streams also check remote expiry/trust/pause. Pausing withdraws current sources. Clipboard replacement invalidates the previous Offer. Existing COM references remain valid objects but can return a read failure after revocation/expiry. Agent exit disconnects out-of-process COM consumers.
+Default clipboard Offer lifetime is 10 minutes; accepted protocol lifetimes cannot exceed 24 hours. File batches have independent bounded retention: replacement retires a batch with a 30-second grace period, and validated reads renew the whole batch for 120 seconds of idle time. Existing COM streams and File Provider items resolve that retained batch even after a newer clipboard Offer. Metadata queries do not extend retention. Explicit withdrawal, service shutdown and authorization failure still stop reads. See docs/TRANSFER_LIFETIME.md for limits and acceptance status.
 
 Clock and conflict watermark persist before publication. Local clipboard contents and source paths do not persist. Identity and explicitly paired peers persist. Runtime pause/mode do not persist across restart in this version.
 

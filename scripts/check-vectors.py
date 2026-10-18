@@ -20,4 +20,4 @@ for vector in vectors['hashes']:
         h.update(chunk)
         left -= len(chunk)
     assert h.hexdigest() == vector['sha256']
-print('PASS: protocol v1 frame, Unicode JSON, offset data, 4 KiB / 64 MiB / 1 GiB SHA-256')
+print('PASS: current metadata frame, Unicode JSON, offset data, 4 KiB / 64 MiB / 1 GiB SHA-256')

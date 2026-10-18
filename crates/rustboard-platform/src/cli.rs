@@ -43,7 +43,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
     let cmd = args.first().map(String::as_str).unwrap_or("--help");
     if cmd == "--help" {
         println!(
-            "Rustboard {}\n\n  status                 Show service and paired devices\n  start                  Start now and enable login startup\n  stop                   Stop now and disable login startup\n  restart                Reload config (preserves startup setting)\n  config                 Open config in your text editor\n  pair [IP[:port]]        Wait for pairing, or connect and confirm\n  unpair IP[:port]        Remove a peer; restart to apply\n\n  --help  --version\n\nDefault port: 45452. Pairing uses the next TCP port temporarily.",
+            "Rustboard {}\n\n  status                 Show service and paired devices\n  start                  Start now and enable login startup\n  stop                   Stop now and disable login startup\n  restart                Restart service (preserves startup setting)\n  reload                 Apply saved config by restarting service\n  config                 Open config in your text editor\n  pair [IP[:port]]        Wait for pairing, or connect and confirm\n  unpair IP[:port]        Remove a peer; restart to apply\n\n  --help  --version\n\nDefault port: 45452. Pairing uses the next TCP port temporarily.",
             env!("CARGO_PKG_VERSION")
         );
         return Ok(());
@@ -59,7 +59,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
     ensure!(
         matches!(
             cmd,
-            "status" | "start" | "stop" | "restart" | "config" | "pair" | "unpair"
+            "status" | "start" | "stop" | "restart" | "reload" | "config" | "pair" | "unpair"
         ),
         "unknown command; use --help"
     );
@@ -110,7 +110,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
             service::stop(true)?;
             println!("Stopped. Login startup disabled.");
         }
-        "restart" => {
+        "restart" | "reload" => {
             ensure!(
                 service::enabled()?,
                 "service is disabled; use start to enable it"
@@ -124,7 +124,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
             ensure!(p.exists(), "install and initialize Rustboard first");
             service::edit(&p)?;
             println!(
-                "Config: {}\nRun rustboard restart after saving.",
+                "Config: {}\nRun rustboard reload after saving.",
                 p.display()
             );
         }

@@ -60,7 +60,8 @@ The pairing-only TLS endpoint temporarily uses the configured listening port plu
 - `status`: compact running state, login startup, active listen/mode, pending restart and active paired-device list. Offline it shows saved peers. This is not a continuous peer connectivity probe. `status --json` is the machine-readable active state and fails when the Agent is unreachable.
 - `start`: immediately starts the installed default service and enables login startup.
 - `stop`: immediately stops it and disables login startup, including launchd KeepAlive. It preserves identity/config/pairs.
-- `restart`: reloads an enabled service; a disabled service requires `start`.
+- `restart`: restarts an enabled service; a disabled service requires `start`.
+- `reload`: applies saved configuration through the same service restart, preserving login startup. It is not a live reload: active clipboard transfers and pairing sessions are interrupted. A disabled service requires `start`.
 - `config`: opens config with VISUAL/EDITOR (an executable path), otherwise Windows Notepad or the macOS default text editor. Save and manually restart.
 - `pair [IP[:port]]`, `unpair IP[:port]`, `--help`, `--version`.
 
@@ -85,7 +86,7 @@ The profile now has ONE editable `config.json` (schema 2), containing `listen`, 
 
 Windows: `identity.private_key` contains `provider: "windows-dpapi"` and an opaque `blob` byte array, encrypted with current-user DPAPI (not machine-wide scope). macOS: it contains `provider: "macos-keychain"` and `account`, referencing the non-synchronizing login Keychain item under service `org.rustboard.device-identity`. The Agent's signed identity controls Keychain access; this is independent of the developer's signing key. No custom cryptography is implemented. DPAPI is a current-user boundary, not protection against arbitrary malicious code already running as that user.
 
-First startup migrates the old identity and peers without changing the certificate fingerprint. It validates the protected key/certificate pair before atomically committing config, then removes the old `identity.json` and `peers.json`. Storage failure aborts startup without silently generating a replacement identity or falling back to plaintext. Removal does not securely erase SSD blocks, prior backups or old test profiles. Do not run an older Agent against a migrated profile.
+Only current schema-2 config is accepted. A fresh installation initializes an explicit empty identity and empty peer list using the native credential store. Existing protected identity and peers are loaded unchanged. Old config, identity/peer files and cache formats are not imported, converted or cleaned up. Credential failures abort startup without replacement identity generation or plaintext fallback.
 
 A config copy alone is not a portable identity backup: Windows DPAPI recovery needs the corresponding Windows credentials/environment, and Mac needs its Keychain item. Missing/locked credentials cause startup failure; unlock the login Keychain and retry, or explicitly establish a new identity and re-pair. Uninstall retains config and Keychain identity. `clock.json`, locks, sockets and temporary data are runtime state, not additional user configuration.
 

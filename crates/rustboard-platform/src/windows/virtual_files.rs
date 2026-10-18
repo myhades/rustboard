@@ -399,6 +399,132 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
     #[test]
+    fn com_batch_over_tls_survives_new_file_and_text_clipboards() {
+        use rustboard_core::{
+            Content, FileEntry, PatternSource,
+            engine::new_id,
+            transport::{Identity, Node, Peer, RemoteSource},
+        };
+        let source_node = Node::new(Identity::generate().unwrap(), vec![]);
+        let target_node = Node::new(Identity::generate().unwrap(), vec![]);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let peer = Peer {
+            address: listener.local_addr().unwrap(),
+            fingerprint: source_node.identity.pin(),
+        };
+        source_node.peers.lock().unwrap().push(Peer {
+            address: "127.0.0.1:1".parse().unwrap(),
+            fingerprint: target_node.identity.pin(),
+        });
+        target_node.peers.lock().unwrap().push(peer.clone());
+        let size = 5 * 1024 * 1024 + 17;
+        let source = Arc::new(PatternSource::new(size));
+        let files: Vec<_> = (0..2)
+            .map(|i| FileEntry {
+                file_id: new_id(),
+                relative_path: format!("file-{i}.bin"),
+                size: Some(size),
+                version: "v".into(),
+                media_type: "application/octet-stream".into(),
+            })
+            .collect();
+        let manifest = source_node
+            .engine
+            .lock()
+            .unwrap()
+            .local(
+                Content::Files {
+                    files: files.clone(),
+                },
+                files
+                    .iter()
+                    .map(|f| (f.file_id.clone(), source.clone() as Arc<dyn ReadAt>))
+                    .collect(),
+            )
+            .unwrap();
+        let server = source_node.serve(listener).unwrap();
+        target_node.sync_once(&peer).unwrap();
+        let object = create(
+            files
+                .iter()
+                .map(|f| PresentedFile {
+                    name: f.relative_path.clone(),
+                    source: Arc::new(RemoteSource::new(
+                        target_node.clone(),
+                        peer.clone(),
+                        manifest.clone(),
+                        f.clone(),
+                    )),
+                })
+                .collect(),
+        )
+        .unwrap();
+        assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
+        unsafe {
+            let mut buffer = vec![0; 65536];
+            for index in 0..2 {
+                let mut medium = object
+                    .GetData(&format(
+                        RegisterClipboardFormatW(w!("FileContents")) as u16,
+                        index,
+                        TYMED_ISTREAM,
+                    ))
+                    .unwrap();
+                let content = medium.u.pstm.as_ref().unwrap();
+                let mut offset = 0;
+                while offset < size {
+                    let count = (size - offset).min(buffer.len() as u64) as u32;
+                    let mut actual = 0;
+                    content
+                        .Read(buffer.as_mut_ptr().cast(), count, Some(&mut actual))
+                        .ok()
+                        .unwrap();
+                    assert_eq!(actual, count);
+                    assert!(
+                        buffer[..actual as usize]
+                            .iter()
+                            .enumerate()
+                            .all(|(i, b)| *b == ((offset + i as u64) % 251) as u8)
+                    );
+                    offset += actual as u64;
+                    if index == 0 && offset == 65536 {
+                        // New file batch, then new text at the receiver. The old
+                        // second file's IStream has not even been requested yet.
+                        source_node
+                            .engine
+                            .lock()
+                            .unwrap()
+                            .local(
+                                Content::Files {
+                                    files: files.clone(),
+                                },
+                                files
+                                    .iter()
+                                    .map(|f| (f.file_id.clone(), source.clone() as Arc<dyn ReadAt>))
+                                    .collect(),
+                            )
+                            .unwrap();
+                        target_node.sync_once(&peer).unwrap();
+                        target_node
+                            .engine
+                            .lock()
+                            .unwrap()
+                            .local(
+                                Content::Text {
+                                    text: "replacement".into(),
+                                },
+                                Default::default(),
+                            )
+                            .unwrap();
+                    }
+                }
+                windows::Win32::System::Ole::ReleaseStgMedium(&mut medium);
+            }
+        }
+        source_node.stop.store(true, Ordering::Release);
+        server.join().unwrap();
+    }
+    #[test]
     fn com_stream_seek_clone_and_eof() {
         let source = Arc::new(rustboard_core::PatternSource::new(4096));
         let s = stream(source.clone(), 0);

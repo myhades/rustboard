@@ -20,12 +20,12 @@ values={'Label':label,'ProgramArguments':[str(base/'bin/rustboardd')],
         'StandardErrorPath':str(base/'stderr.txt'),'StandardOutPath':str(base/'stdout.txt')}
 plist.write_bytes(plistlib.dumps(values))
 env=dict(os.environ,RUSTBOARD_PROFILE='launchtest')
-def doctor():
+def status():
     p=subprocess.run([str(base/'bin/rustboard'),'status','--json'],capture_output=True,text=True,env=env,timeout=3)
     return json.loads(p.stdout) if p.returncode==0 else None
 def wait_service():
     for _ in range(50):
-        value=doctor()
+        value=status()
         if value and value.get('ok'):return value
         time.sleep(.1)
     raise RuntimeError('launchd IPC not available; inspect dedicated stderr.txt')

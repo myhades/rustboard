@@ -1,12 +1,12 @@
-# Rustboard protocol v1
+# Rustboard current protocol
 
 The executable schema is `crates/rustboard-core/src/protocol.rs`; independent vectors are `tests/protocol/vectors.json`. JSON field order is irrelevant. Strings are UTF-8. Integer fields are unsigned, except where explicitly stated; Swift must decode u64 as UInt64, not floating point. Unknown fields are rejected in typed messages.
 
 ## Network
 
-TCP protected by TLS1.3 only. ALPN is the ASCII bytes `rustboard/1`. Both endpoints present a device certificate and verify the entire DER certificate's SHA-256 against an explicitly paired fingerprint. TLS CertificateVerify signatures are validated by rustls/ring. There is no public PKI hostname meaning: this is exact certificate pinning. Device ID is the UUID-formatted first16 bytes of the SHA-256 certificate digest (without rewriting UUID version bits). Fingerprints are64 lowercase hexadecimal characters. Both sides must independently pair before connection. Discovery is not trust.
+TCP protected by TLS1.3 only. ALPN is the ASCII bytes `rustboard/2`. Both endpoints present a device certificate and verify the entire DER certificate's SHA-256 against an explicitly paired fingerprint. TLS CertificateVerify signatures are validated by rustls/ring. There is no public PKI hostname meaning: this is exact certificate pinning. Device ID is the UUID-formatted first16 bytes of the SHA-256 certificate digest (without rewriting UUID version bits). Fingerprints are64 lowercase hexadecimal characters. Both sides must independently pair before connection. Discovery is not trust.
 
-Each application frame is a four-byte big-endian unsigned length followed by exactly that many UTF-8 JSON bytes. Length must be1..1,048,576. A read asks for1..65,536 bytes. Data `bytes` is a JSON array of integers0..255, not base64. This is intentionally easy to implement independently, at the cost of wire overhead. Changing encoding requires a protocol revision.
+Control frames use a four-byte big-endian unsigned length followed by UTF-8 JSON, bounded to 1 MiB. File Data responses use only the binary framing described in docs/TRANSPORT_V2.md, bounded to 4 MiB on the network and 64 KiB per local IPC read. No old ALPN, JSON file-data response or capability fallback is supported. The `protocol:1` fields below identify the current metadata/envelope schema; they do not enable a second transport implementation.
 
 ## Offer
 
@@ -40,19 +40,20 @@ Compare Offers lexicographically by `(event_sequence, source_device, offer_id)`;
 
 Error codes: unauthorized, expired, not_found, version_changed, invalid_request, cancelled, busy, io, unsupported. Current implementation uses invalid_request for most invalid file/offer/range lookups and version_changed for source read failure. Do not branch on English diagnostics.
 
-Every request is authorized against the current peer list, including existing TLS sessions after unpair. File authorization requires the complete `(source_device, offer_id, file_id, version)` tuple; remote paths are never opened. A source only serves its current unexpired local Offer.
+Every request is authorized against the current peer list, including existing TLS sessions after unpair. File authorization requires the complete `(source_device, offer_id, file_id, version)` tuple; remote paths are never opened. A source serves current or retained file batches under the bounded lifetimes in docs/TRANSFER_LIFETIME.md. Clipboard replacement is not transfer revocation.
 
 One request is outstanding per connection. Cancellation is between bounded chunks: stop issuing reads, send Cancel if useful, and close the connection. A synchronous chunk already in progress may finish; Cancel does not interrupt a concurrent syscall. A disconnect never advances the client's cursor. A later request may reconnect with the same tuple and offset, provided the Offer is still current. There is no resume of partially committed destination files without the consumer validating the same version.
 
-## Native local IPC v1
+## Native local IPC
 
-Same frame encoding. Windows endpoint is `\\.\pipe\Rustboard-<userSID>-<profile>`, DACL restricted to current user, remote clients rejected. macOS must implement equivalent authenticated local transport (see handoff); never expose the local IPC over TCP.
+Control/error JSON and binary file-data framing as above. Windows endpoint is `\\.\pipe\Rustboard-<userSID>-<profile>`, DACL restricted to current user, remote clients rejected. macOS uses an authenticated Unix socket with same-team signed process validation; never expose the local IPC over TCP.
 
 Envelope: `{"protocol":1,"request":{...}}`.
 
 - `{"type":"control","args":["status"]}` etc: native Agent control.
 - `{"type":"get_offer"}` → `{"ok":true,"protocol":1,"offer":<Offer or null>}`.
-- `{"type":"read","request_id":7,"offer_id":"...","file_id":"...","version":"...","offset":249,"length":5}` → `{"ok":true,"protocol":1,"response":<Data message>}`. Source device is resolved from the current authenticated Offer, never supplied as a path.
+- `{"type":"read_binary","request_id":7,"offer_id":"...","file_id":"...","version":"...","offset":249,"length":5}` → binary Data frame. Source device is resolved from the current authenticated Offer, never supplied as a path.
+- `{"type":"get_file_offer","offer_id":"..."}` → retained batch metadata; `get_file_offers` lists retained file batches. Neither operation reads file bodies or renews idle deadlines.
 - `{"type":"cancel","request_id":7}` → successful acknowledgment. Stop scheduling further reads; one in-flight bounded request may complete.
 
 Failures: `{"ok":false,"protocol":1,"code":"io","error":"diagnostic"}` in the current Windows adapter. The vocabulary above is reserved; adapters may refine codes compatibly. Consumers must handle all failures without displaying/logging clipboard body or source contents. Control success has `ok:true`; status also includes protocol/device/fingerprint/mode. The raw JSON-vector/native-pipe checker proves offset, version and bounds validation against the live Agent.

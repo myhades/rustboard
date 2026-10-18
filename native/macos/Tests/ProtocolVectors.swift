@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-@main struct Compatibility {
+@main struct ProtocolVectors {
     static func main() throws {
         let vector = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
         struct Vectors: Decodable {let offer: Offer; let data: DataMessage; let invalid_paths: [String]}
@@ -14,7 +14,7 @@ import CryptoKit
         do {_ = try JSONDecoder().decode(DataMessage.self,from:badData);fatalError("accepted invalid byte")} catch {}
         let unknown=Data(#"{"type":"data","request_id":7,"offset":249,"bytes":[1],"eof":false,"extra":true}"#.utf8)
         do {_ = try JSONDecoder().decode(DataMessage.self,from:unknown);fatalError("accepted unknown field")} catch {}
-        let encoded = try JSONEncoder().encode(Envelope(request: Operation(type:"read",request_id:UInt64.max,offer_id:v.offer.offer_id,file_id:v.offer.content.files![0].file_id,version:"pattern-v1",offset:9007199254740993,length:5)))
+        let encoded = try JSONEncoder().encode(Envelope(request: Operation(type:"read_binary",request_id:UInt64.max,offer_id:v.offer.offer_id,file_id:v.offer.content.files![0].file_id,version:"pattern-v1",offset:9007199254740993,length:5)))
         let string=String(data:encoded,encoding:.utf8)!
         precondition(string.contains("18446744073709551615") && string.contains("9007199254740993"))
         let framedLength = try frameLength(frame(encoded).prefix(4)); precondition(framedLength == encoded.count)
@@ -33,13 +33,15 @@ import CryptoKit
         let folder=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:false)
         defer {try? FileManager.default.removeItem(at:folder)}
-        for mode in ["success","cancel","disconnect","offset","request_id","early_eof","late_eof","short","version","restart","commit_failure"] {
+        for mode in ["success","clipboard_replaced","cancel","disconnect","offset","request_id","early_eof","late_eof","short","version","restart","commit_failure"] {
             var reads=0;var cancels=0
             let progress=Progress(totalUnitCount:Int64(file.size!))
             let url=folder.appendingPathComponent(mode)
             func call(_ op:Operation) throws -> Reply {
                 if op.type == "cancel" {cancels += 1;return Reply(ok:true,protocol:1,offer:nil,response:nil)}
-                if op.type == "get_offer" {
+                if op.type == "get_offer" {fatalError("hydration must not consult the current clipboard")}
+                if op.type == "get_file_offer" {
+                    precondition(op.offer_id == offer.offer_id)
                     return Reply(ok:true,protocol:1,offer:(mode == "restart" && reads > 0) ? nil : offer,response:nil)
                 }
                 reads += 1
@@ -53,12 +55,12 @@ import CryptoKit
             }
             do {
                 try hydrate(offer,file,to:url,progress:progress,call:call,commit: {_ in if mode == "commit_failure" {throw WireError.unavailable}})
-                precondition(mode == "success")
+                precondition(mode == "success" || mode == "clipboard_replaced")
                 let bytes=try Data(contentsOf:url)
                 precondition(bytes.count==131073 && bytes.enumerated().allSatisfy {$0.element==UInt8($0.offset%251)})
                 let attrs=try FileManager.default.attributesOfItem(atPath:url.path)
                 precondition((attrs[.posixPermissions] as! NSNumber).intValue==0o600)
-            } catch {precondition(mode != "success");precondition(!FileManager.default.fileExists(atPath:url.path));precondition(cancels==1)}
+            } catch {precondition(mode != "success" && mode != "clipboard_replaced");precondition(!FileManager.default.fileExists(atPath:url.path));precondition(cancels==1)}
             print("PASS hydrate \(mode) reads=\(reads) cancels=\(cancels)")
         }
         let pending = folder.appendingPathComponent("rb-pending-fixture")

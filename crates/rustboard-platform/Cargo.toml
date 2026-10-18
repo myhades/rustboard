@@ -30,3 +30,7 @@ libc = "0.2"
 [[example]]
 name = "macos_acceptance_peer"
 path = "examples/macos/acceptance_peer.rs"
+
+[[example]]
+name = "small_batch_probe"
+path = "examples/windows/small_batch_probe.rs"

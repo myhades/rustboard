@@ -1,5 +1,20 @@
 # Rustboard 0.1.0 prototype acceptance
 
+## Current installed build: transfer lifetime and reload (2026-10-18)
+
+Current-only cleanup below remains included. Both platforms now run bounded retained file batches and the TLS idle reconnect fix; reload restarts with saved settings. Mac→Windows real COM paused-read/text-replacement/late second-stream test and Windows→Mac user Finder paste passed with two 4 KiB fixtures, as did Mac idle presentation cleanup. See docs/TRANSFER_LIFETIME.md and docs/test-results/transfer-lifetime/. This is not Finder mid-copy replacement, Handoff, concurrent cancellation or throughput acceptance. No large files crossed the metered link. Temporary reverse SSH forwarding was used for tests and removed; current reverse routing remains a deployment limitation.
+
+## Current-only cleanup (included)
+
+Removed old TLS ALPN/JSON data paths, IPC read/capability fallback, config and identity/peer migration, retired-cache conversion, obsolete internal CLI commands and compatibility-only tests. Current control JSON remains; protocol:1 is its schema marker, not an old transport path.
+
+Both installed builds preserve the previous device fingerprints and peer lists. Installed binary hashes match this build; Mac signing was performed by the user. Windows workspace tests (10 core, 1 vector, 8 platform), fmt and Clippy passed. Mac Rust release tests (10 core, 1 vector, 5 platform), Swift current framing/protocol/hydration failure tests and builds passed. Windows isolated CLI pairing regression passed, including decline, mutual confirmation, restart-only application, unpair and terminal-loss expiry. Installed native Unicode clipboard synchronization passed in both directions.
+
+Real Finder/Explorer file regression is recorded below when complete. No new 1 GiB benchmark or full OS reboot claim. Historical package manifests and performance figures below do not describe this new build.
+
+Everything below is historical evidence of earlier stages; migration and old protocol behavior described there has been removed.
+
+
 ## CLI and enrollment follow-up (latest)
 
 - Public CLI consolidated to status/start/stop/restart/config/pair/unpair; --help/--version and status --json. Removed public pause/resume/mode/peers/doctor. Legacy paused config removed on startup; mode remains in config.

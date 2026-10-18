@@ -22,7 +22,7 @@ from pathlib import Path
 os.umask(0o077)
 directory=Path(sys.argv[1]); directory.mkdir(parents=True,exist_ok=True)
 path=directory/'config.json'
-v=json.loads(path.read_text()) if path.exists() else dict(listen=None,mode='all')
+v=json.loads(path.read_text()) if path.exists() else dict(schema=2,listen=None,mode='all',peers=[],identity=None)
 if sys.argv[2]:
     host,port=sys.argv[2].rsplit(':',1); ipaddress.ip_address(host.strip('[]'))
     if not 0<int(port)<65536:raise SystemExit('Invalid port')

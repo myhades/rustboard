@@ -12,7 +12,7 @@ def result(p):
 def peers(i):return json.loads((profiles[i][2]/'config.json').read_text())['peers']
 try:
  for i,port in enumerate([48920,48924]):
-  name='cli-'+uuid.uuid4().hex[:12];env=dict(os.environ,RUSTBOARD_PROFILE=name);path=pathlib.Path(env['LOCALAPPDATA'])/'Rustboard'/name;path.mkdir();profiles.append((port,env,path));(path/'config.json').write_text(json.dumps({'listen':f'127.0.0.1:{port}','mode':'text'}));agents.append(subprocess.Popen([str(agent)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
+  name='cli-'+uuid.uuid4().hex[:12];env=dict(os.environ,RUSTBOARD_PROFILE=name);path=pathlib.Path(env['LOCALAPPDATA'])/'Rustboard'/name;path.mkdir();profiles.append((port,env,path));(path/'config.json').write_text(json.dumps({'schema':2,'identity':None,'peers':[],'listen':f'127.0.0.1:{port}','mode':'text'}));agents.append(subprocess.Popen([str(agent)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
   for _ in range(50):
    r=run(i,'status','--json')
    if r.returncode==0:break

@@ -32,7 +32,7 @@ try {
     }
     foreach ($name in 'rustboard.exe','rustboardd.exe') {Copy-Item -LiteralPath (Join-Path $Source $name) -Destination (Join-Path $bin $name) -Force}
     $configPath=Join-Path $data 'config.json'
-    $config=[pscustomobject]@{listen=$null;mode='all'}
+    $config=[pscustomobject]@{schema=2;listen=$null;mode='all';peers=@();identity=$null}
     if (Test-Path -LiteralPath $configPath) { $config=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
     if ($Listen) {$config.listen=$Listen}
     if (!$config.listen) {throw 'First install requires -Listen <LAN-IP:port>'}

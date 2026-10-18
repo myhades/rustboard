@@ -148,7 +148,7 @@ impl Server {
                         authenticate(&stream, false)?;
                         while !node.stop.load(Ordering::Acquire) {
                             let req: IpcRequest = read_frame(&mut stream)?;
-                            let binary = matches!(req.request, IpcOperation::ReadBinary { .. });
+
                             let reply = (|| -> Result<IpcReply> {
                                 ensure!(req.protocol == 1, "unsupported protocol");
                                 match req.request {
@@ -159,11 +159,7 @@ impl Server {
                                 eprintln!("IPC request failed: {error:#}");
                                 IpcReply::Other(serde_json::json!({"ok":false,"protocol":1,"code":"io","error":"request failed"}))
                             });
-                            rustboard_core::transport::write_ipc_reply(
-                                &mut stream,
-                                &reply,
-                                binary,
-                            )?;
+                            rustboard_core::transport::write_ipc_reply(&mut stream, &reply)?;
                         }
                         Ok(())
                     };
@@ -180,7 +176,7 @@ impl Server {
             "invalid command"
         );
         match args[0].as_str() {
-            "status" | "doctor" => return crate::config::status(node, &self.dir),
+            "status" => return crate::config::status(node, &self.dir),
             "pair-begin" | "pair-poll" | "pair-approve" | "pair-cancel" => {
                 return crate::pairing::control(node, &self.dir, &args);
             }
@@ -228,7 +224,7 @@ mod tests {
         let metadata = node.local_ipc(IpcOperation::GetOffer).unwrap();
         assert_eq!(metadata["offer"]["offer_id"], offer.offer_id);
         assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
-        let read = |version: &str, offset, length| IpcOperation::Read {
+        let read = |version: &str, offset, length| IpcOperation::ReadBinary {
             request_id: 7,
             offer_id: offer.offer_id.clone(),
             file_id: id.clone(),
@@ -258,7 +254,9 @@ mod tests {
             .as_mut()
             .unwrap()
             .expires_unix_ms = 0;
-        assert!(node.local_ipc(read("v1", 0, 1)).is_err());
+        assert!(node.local_ipc(read("v1", 0, 1)).is_ok());
         assert!(node.local_ipc(IpcOperation::GetOffer).unwrap()["offer"].is_null());
+        node.engine.lock().unwrap().withdraw();
+        assert!(node.local_ipc(read("v1", 0, 1)).is_err());
     }
 }

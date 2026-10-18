@@ -102,7 +102,7 @@ fn main() -> Result<()> {
         let length = (remote.len() - offset).min(MAX_CHUNK as u64) as usize;
         let t = Instant::now();
         if ipc {
-            let reply = node.local_ipc_reply(IpcOperation::Read {
+            let reply = node.local_ipc_reply(IpcOperation::ReadBinary {
                 request_id: offset / MAX_CHUNK as u64,
                 offer_id: offer.offer_id.clone(),
                 file_id: file.file_id.clone(),

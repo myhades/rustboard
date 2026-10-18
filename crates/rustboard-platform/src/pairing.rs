@@ -147,15 +147,13 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                     alive(&state.lock().unwrap()),
                     "pairing cancelled or expired"
                 );
-                crate::config::update(
+                crate::config::save_peer(
                     &dir,
                     &node.identity.pin(),
-                    &[
-                        "pair".into(),
-                        peer.to_string(),
-                        "--fingerprint".into(),
-                        ch.pin.clone(),
-                    ],
+                    rustboard_core::transport::Peer {
+                        address: peer,
+                        fingerprint: ch.pin.clone(),
+                    },
                 )?;
                 // Both persist before reporting completion. Disconnect may leave one side saved; retry is idempotent.
                 ch.send(2)?;

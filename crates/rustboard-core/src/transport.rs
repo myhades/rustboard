@@ -1,9 +1,6 @@
 //! TLS 1.3 with explicit SHA-256 certificate pins and proof-of-possession signatures.
 //! Pairing is bilateral and out-of-band: no unauthenticated clipboard endpoint exists.
-use crate::{
-    engine::{Engine, now_ms},
-    *,
-};
+use crate::{engine::Engine, *};
 use anyhow::{Result, ensure};
 use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -21,7 +18,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub fn fingerprint(cert: &[u8]) -> String {
@@ -205,7 +202,6 @@ impl ClientCertVerifier for Pins {
 }
 
 pub type Client = StreamOwned<ClientConnection, TcpStream>;
-const ALPN_V1: &[u8] = b"rustboard/1";
 const ALPN_V2: &[u8] = b"rustboard/2";
 // Active sequential reads only. Independent of file size; no work at publication.
 const READ_WINDOW: usize = 4 * 1024 * 1024;
@@ -258,7 +254,6 @@ fn read_v2_data<R: Read>(reader: &mut R, limit: usize) -> Result<DataReply> {
     let mut bytes = vec![0; size - 17];
     reader.read_exact(&mut bytes)?;
     Ok(DataReply {
-        _kind: DataReplyKind::Data,
         request_id: u64::from_be_bytes(header[4..12].try_into().unwrap()),
         offset: u64::from_be_bytes(header[12..20].try_into().unwrap()),
         eof: header[20] == 1,
@@ -271,9 +266,6 @@ fn read_response(stream: &mut Client) -> Result<Message> {
 }
 
 pub fn connect(identity: &Identity, peer: &Peer) -> Result<Client> {
-    connect_version(identity, peer, false)
-}
-fn connect_version(identity: &Identity, peer: &Peer, legacy: bool) -> Result<Client> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut config = ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&version::TLS13])?
@@ -286,11 +278,7 @@ fn connect_version(identity: &Identity, peer: &Peer, legacy: bool) -> Result<Cli
             vec![CertificateDer::from(identity.cert.clone())],
             identity.key(),
         )?;
-    config.alpn_protocols = if legacy {
-        vec![ALPN_V1.to_vec()]
-    } else {
-        vec![ALPN_V2.to_vec(), ALPN_V1.to_vec()]
-    };
+    config.alpn_protocols = vec![ALPN_V2.to_vec()];
     let socket = TcpStream::connect_timeout(&peer.address, Duration::from_secs(3))?;
     socket.set_read_timeout(Some(Duration::from_secs(5)))?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -301,16 +289,17 @@ fn connect_version(identity: &Identity, peer: &Peer, legacy: bool) -> Result<Cli
         stream.conn.complete_io(&mut stream.sock)?;
     }
     ensure!(
-        matches!(stream.conn.alpn_protocol(), Some(ALPN_V1 | ALPN_V2)),
+        matches!(stream.conn.alpn_protocol(), Some(ALPN_V2)),
         "ALPN mismatch"
     );
     Ok(stream)
 }
 
-type IpcSourceKey = (String, String, String, String);
+type IpcSourceKey = (String, String, String, String, u64);
 #[derive(Default)]
 struct ReadConnection {
     stream: Option<Client>,
+    last_request: Option<Instant>,
     bytes: Vec<u8>,
     offset: u64,
     next: Option<u64>,
@@ -329,8 +318,7 @@ pub enum IpcReply {
     Other(serde_json::Value),
 }
 
-// Keep the same sorted field order as the original Value serializer, including
-// the bytes-first response consumed by the Swift fast path.
+// In-memory data reply; native adapters encode the payload as binary.
 #[derive(Serialize)]
 pub struct IpcData {
     bytes: Vec<u8>,
@@ -341,9 +329,9 @@ pub struct IpcData {
     kind: &'static str,
 }
 
-/// Explicitly requested binary IPC data; control/error and legacy replies stay JSON.
-pub fn write_ipc_reply<W: Write>(writer: &mut W, reply: &IpcReply, binary: bool) -> Result<()> {
-    if binary && let IpcReply::Data { response, .. } = reply {
+/// File data has one binary encoding; control and error messages are JSON.
+pub fn write_ipc_reply<W: Write>(writer: &mut W, reply: &IpcReply) -> Result<()> {
+    if let IpcReply::Data { response, .. } = reply {
         write_binary_data(
             writer,
             response.request_id,
@@ -380,7 +368,19 @@ impl Node {
                 engine.expire();
                 ensure!(!engine.paused, "paused");
                 Ok(IpcReply::Other(
-                    serde_json::json!({"ok":true,"protocol":1,"offer":engine.current,"binary_data":true}),
+                    serde_json::json!({"ok":true,"protocol":1,"offer":engine.current}),
+                ))
+            }
+            IpcOperation::GetFileOffer { offer_id } => {
+                let offer = self.engine.lock().unwrap().file_offer(&offer_id)?;
+                Ok(IpcReply::Other(
+                    serde_json::json!({"ok":true,"protocol":1,"offer":offer}),
+                ))
+            }
+            IpcOperation::GetFileOffers => {
+                let offers = self.engine.lock().unwrap().retained_offers();
+                Ok(IpcReply::Other(
+                    serde_json::json!({"ok":true,"protocol":1,"offers":offers}),
                 ))
             }
             IpcOperation::ReadBinary {
@@ -390,26 +390,9 @@ impl Node {
                 version,
                 offset,
                 length,
-            }
-            | IpcOperation::Read {
-                request_id,
-                offer_id,
-                file_id,
-                version,
-                offset,
-                length,
             } => {
                 ensure!(length > 0 && length as usize <= MAX_CHUNK, "invalid range");
-                let offer = {
-                    let mut engine = self.engine.lock().unwrap();
-                    engine.expire();
-                    ensure!(!engine.paused, "paused");
-                    engine
-                        .current
-                        .clone()
-                        .ok_or_else(|| anyhow::anyhow!("expired"))?
-                };
-                ensure!(offer.offer_id == offer_id, "expired");
+                let offer = self.engine.lock().unwrap().file_offer(&offer_id)?;
                 let Content::Files { files } = &offer.content else {
                     anyhow::bail!("not file offer")
                 };
@@ -440,10 +423,11 @@ impl Node {
                         offer.offer_id.clone(),
                         file.file_id.clone(),
                         file.version.clone(),
+                        request_id,
                     );
                     let connection = {
                         let mut cache = self.ipc_connections.lock().unwrap();
-                        cache.retain(|(k, _)| k.0 == key.0 && k.1 == key.1);
+
                         if let Some((_, connection)) = cache.iter().find(|(k, _)| *k == key) {
                             connection.clone()
                         } else {
@@ -465,7 +449,10 @@ impl Node {
                 bytes.truncate(n);
                 if offset + n as u64 == source.len() {
                     self.ipc_connections.lock().unwrap().retain(|(key, _)| {
-                        key.1 != offer_id || key.2 != file_id || key.3 != version
+                        key.1 != offer_id
+                            || key.2 != file_id
+                            || key.3 != version
+                            || key.4 != request_id
                     });
                 }
                 Ok(IpcReply::Data {
@@ -481,7 +468,10 @@ impl Node {
                 })
             }
             IpcOperation::Cancel { request_id } => {
-                self.ipc_connections.lock().unwrap().clear();
+                self.ipc_connections
+                    .lock()
+                    .unwrap()
+                    .retain(|(key, _)| key.4 != request_id);
                 Ok(IpcReply::Other(
                     serde_json::json!({"ok":true,"protocol":1,"request_id":request_id}),
                 ))
@@ -574,16 +564,15 @@ impl Node {
                     vec![CertificateDer::from(self.identity.cert.clone())],
                     self.identity.key(),
                 )?;
-        config.alpn_protocols = vec![ALPN_V2.to_vec(), ALPN_V1.to_vec()];
+        config.alpn_protocols = vec![ALPN_V2.to_vec()];
         let mut stream = StreamOwned::new(ServerConnection::new(Arc::new(config))?, socket);
         while stream.conn.is_handshaking() {
             stream.conn.complete_io(&mut stream.sock)?;
         }
         ensure!(
-            matches!(stream.conn.alpn_protocol(), Some(ALPN_V1 | ALPN_V2)),
+            matches!(stream.conn.alpn_protocol(), Some(ALPN_V2)),
             "ALPN mismatch"
         );
-        let binary = stream.conn.alpn_protocol() == Some(ALPN_V2);
         let cert = &stream
             .conn
             .peer_certificates()
@@ -656,8 +645,7 @@ impl Node {
                     match source {
                         Ok(source)
                             if length > 0
-                                && length as usize
-                                    <= if binary { READ_WINDOW } else { MAX_CHUNK }
+                                && length as usize <= READ_WINDOW
                                 && offset <= source.len() =>
                         {
                             let mut bytes = vec![0; length as usize];
@@ -713,11 +701,7 @@ impl Node {
                     code: ErrorCode::InvalidRequest,
                 },
             };
-            if binary {
-                write_v2_response(&mut stream, &response)?;
-            } else {
-                write_frame(&mut stream, &response)?;
-            }
+            write_v2_response(&mut stream, &response)?;
         }
         Ok(())
     }
@@ -787,26 +771,24 @@ impl ReadAt for RemoteSource {
             "cancelled"
         );
         ensure!(
-            self.node.trusted(&self.peer.fingerprint) && self.offer.expires_unix_ms > now_ms(),
+            self.node.trusted(&self.peer.fingerprint),
             "revoked or expired"
         );
         ensure!(
             offset <= self.len() && buffer.len() <= MAX_CHUNK,
             "invalid range"
         );
-        if buffer.is_empty() || offset == self.len() {
+        if buffer.is_empty() {
             return Ok(0);
         }
         let mut connection = self.connection.lock().unwrap();
         let result = (|| {
-            let current = self.node.engine.lock().unwrap().current.clone();
-            ensure!(
-                current
-                    .as_ref()
-                    .is_some_and(|o| o.offer_id == self.offer.offer_id
-                        && o.source_device == self.offer.source_device),
-                "offer replaced"
-            );
+            self.node.engine.lock().unwrap().touch_file(
+                &self.offer.source_device,
+                &self.offer.offer_id,
+                &self.file.file_id,
+                &self.file.version,
+            )?;
             let available = offset
                 .checked_sub(connection.offset)
                 .and_then(|n| usize::try_from(n).ok());
@@ -816,16 +798,24 @@ impl ReadAt for RemoteSource {
                 connection.next = Some(offset + n as u64);
                 return Ok(n);
             }
+            // The server closes idle sockets after five seconds. Cached bytes do not
+            // keep that socket alive; reconnect before issuing a later request.
+            if connection
+                .last_request
+                .is_some_and(|at| at.elapsed() >= Duration::from_secs(4))
+            {
+                connection.stream = None;
+            }
             if connection.stream.is_none() {
                 connection.stream = Some(connect(&self.node.identity, &self.peer)?);
             }
-            let binary = connection.stream.as_ref().unwrap().conn.alpn_protocol() == Some(ALPN_V2);
-            let length = if binary && connection.next == Some(offset) && buffer.len() == MAX_CHUNK {
+            let length = if connection.next == Some(offset) && buffer.len() == MAX_CHUNK {
                 (self.len() - offset).min(READ_WINDOW as u64) as usize
             } else {
                 buffer.len()
             };
             connection.bytes.clear();
+            connection.last_request = Some(Instant::now());
             let stream = connection.stream.as_mut().unwrap();
             write_frame(
                 stream,
@@ -839,14 +829,7 @@ impl ReadAt for RemoteSource {
                     length: length as u32,
                 },
             )?;
-            // A read can only succeed with Data. Decode directly into the typed
-            // payload, avoiding serde's internally-tagged enum Content buffer
-            // (one intermediate value per byte of the JSON array).
-            let reply = if binary {
-                read_v2_data(stream, length)?
-            } else {
-                read_frame::<_, DataReply>(stream)?
-            };
+            let reply = read_v2_data(stream, length)?;
             match reply {
                 DataReply {
                     request_id: 1,
@@ -880,21 +863,11 @@ impl ReadAt for RemoteSource {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct DataReply {
-    #[serde(rename = "type")]
-    _kind: DataReplyKind,
     request_id: u64,
     offset: u64,
     bytes: Vec<u8>,
     eof: bool,
-}
-
-#[derive(Deserialize)]
-enum DataReplyKind {
-    #[serde(rename = "data")]
-    Data,
 }
 
 #[cfg(test)]
@@ -961,38 +934,43 @@ mod tests {
         let server = a.serve(listener).unwrap();
         b.sync_once(&peer).unwrap();
         assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
-        // Old clients negotiate v1 with a new server and retain the exact JSON frame.
-        let mut legacy = connect_version(&b.identity, &peer, true).unwrap();
-        assert_eq!(legacy.conn.alpn_protocol(), Some(ALPN_V1));
-        write_frame(
-            &mut legacy,
-            &Message::Read {
-                request_id: 3,
-                source_device: offer.source_device.clone(),
-                offer_id: offer.offer_id.clone(),
-                file_id: file.file_id.clone(),
-                version: file.version.clone(),
-                offset: 0,
-                length: 1,
-            },
-        )
-        .unwrap();
-        let reply: DataReply = read_frame(&mut legacy).unwrap();
-        assert_eq!(reply.bytes, [0]);
         let remote = RemoteSource::new(b.clone(), peer, offer, file);
         remote.read_at(0, &mut [0; 4096]).unwrap();
-        assert_eq!(source.bytes_read.load(Ordering::Relaxed), 4097);
+        assert_eq!(source.bytes_read.load(Ordering::Relaxed), 4096);
+        a.engine
+            .lock()
+            .unwrap()
+            .local(
+                Content::Text {
+                    text: "source changed".into(),
+                },
+                Default::default(),
+            )
+            .unwrap();
+        b.sync_once(&remote.peer).unwrap();
+        b.engine
+            .lock()
+            .unwrap()
+            .local(
+                Content::Text {
+                    text: "receiver changed".into(),
+                },
+                Default::default(),
+            )
+            .unwrap();
+        // Exercise a real server idle disconnect after clipboard replacement.
+        std::thread::sleep(Duration::from_secs(6));
         let mut bytes = vec![0; MAX_CHUNK];
         remote.read_at(4096, &mut bytes).unwrap();
         assert_eq!(
             source.bytes_read.load(Ordering::Relaxed),
-            4097 + READ_WINDOW as u64
+            4096 + READ_WINDOW as u64
         );
         remote.read_at(4096 + MAX_CHUNK as u64, &mut bytes).unwrap();
         assert_eq!(bytes[0], ((4096 + MAX_CHUNK) % 251) as u8);
         assert_eq!(
             source.bytes_read.load(Ordering::Relaxed),
-            4097 + READ_WINDOW as u64
+            4096 + READ_WINDOW as u64
         );
         assert!(remote.connection.lock().unwrap().bytes.len() <= READ_WINDOW);
         b.engine.lock().unwrap().withdraw();
@@ -1004,54 +982,6 @@ mod tests {
         assert!(remote.connection.lock().unwrap().bytes.is_empty());
         a.stop.store(true, Ordering::Release);
         server.join().unwrap();
-    }
-    #[test]
-    fn typed_ipc_reply_is_byte_identical_to_original_value() {
-        for bytes in [vec![], (0..=255).collect(), vec![251; MAX_CHUNK]] {
-            for eof in [false, true] {
-                let old = serde_json::json!({"ok":true,"protocol":1,"response":Message::Data {
-                    request_id: u64::MAX, offset: 9007199254740993, bytes: bytes.clone(), eof,
-                }});
-                let new = IpcReply::Data {
-                    ok: true,
-                    protocol: 1,
-                    response: IpcData {
-                        bytes: bytes.clone(),
-                        eof,
-                        offset: 9007199254740993,
-                        request_id: u64::MAX,
-                        kind: "data",
-                    },
-                };
-                assert_eq!(
-                    serde_json::to_vec(&old).unwrap(),
-                    serde_json::to_vec(&new).unwrap()
-                );
-            }
-        }
-    }
-    #[test]
-    fn direct_data_decoder_preserves_wire_validation() {
-        let value = Message::Data {
-            request_id: u64::MAX,
-            offset: 9007199254740993,
-            bytes: vec![0, 250, 255],
-            eof: true,
-        };
-        let encoded = serde_json::to_vec(&value).unwrap();
-        let reply: DataReply = serde_json::from_slice(&encoded).unwrap();
-        assert_eq!(reply.request_id, u64::MAX);
-        assert_eq!(reply.offset, 9007199254740993);
-        assert_eq!(reply.bytes, [0, 250, 255]);
-        for invalid in [
-            r#"{"type":"error","request_id":1,"offset":0,"bytes":[],"eof":true}"#,
-            r#"{"type":"data","request_id":1,"offset":0,"bytes":[256],"eof":true}"#,
-            r#"{"type":"data","request_id":1,"offset":0,"bytes":[-1],"eof":true}"#,
-            r#"{"type":"data","request_id":1,"offset":0,"bytes":[1.0],"eof":true}"#,
-            r#"{"type":"data","request_id":1,"offset":0,"bytes":[],"eof":true,"extra":0}"#,
-        ] {
-            assert!(serde_json::from_str::<DataReply>(invalid).is_err());
-        }
     }
     #[test]
     fn mutual_tls_offer_lazy_read_and_untrusted_rejection() {
@@ -1090,7 +1020,7 @@ mod tests {
         let server = a.serve(listener).unwrap();
         b.sync_once(&peer).unwrap();
         assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
-        let ipc_read = || IpcOperation::Read {
+        let ipc_read = || IpcOperation::ReadBinary {
             request_id: 7,
             offer_id: offer.offer_id.clone(),
             file_id: file.file_id.clone(),

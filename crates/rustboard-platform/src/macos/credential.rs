@@ -16,7 +16,7 @@ pub fn store(account: &str, key: &[u8]) -> Result<Value> {
     let status = unsafe { rb_keychain_store(name.as_ptr(), key.as_ptr(), key.len()) };
     ensure!(
         status == 0,
-        "Keychain store failed (OSStatus {status}); identity migration not committed"
+        "Keychain store failed (OSStatus {status}); identity initialization not committed"
     );
     Ok(json!({"provider":"macos-keychain","account":account}))
 }

@@ -12,8 +12,8 @@ import CryptoKit
             let started=Date()
             precondition(reads==0)
             try hydrate(offer,file,to:url,progress:Progress(totalUnitCount:Int64(h.size))) {op in
-                if op.type == "get_offer" {return Reply(ok:true,protocol:1,offer:offer,response:nil)}
-                guard op.type == "read" else {throw WireError.invalid}
+                if op.type == "get_file_offer" {return Reply(ok:true,protocol:1,offer:offer,response:nil)}
+                guard op.type == "read_binary" else {throw WireError.invalid}
                 reads += 1
                 let n=min(UInt64(op.length!),h.size-op.offset!)
                 let bytes=(0..<n).map {UInt8((op.offset!+$0)%251)}

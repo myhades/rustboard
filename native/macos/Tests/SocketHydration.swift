@@ -8,8 +8,6 @@ import Darwin
     static func main() throws {
         let path = CommandLine.arguments[1]
         let destination = URL(fileURLWithPath: CommandLine.arguments[2])
-        let oldDecoder = CommandLine.arguments.contains("--generic")
-        let jsonOnly = CommandLine.arguments.contains("--json")
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else {throw WireError.unavailable}
         defer {close(fd)}
@@ -23,7 +21,7 @@ import Darwin
         withUnsafeMutableBytes(of: &address.sun_path) {$0.copyBytes(from: pathBytes)}
         let connected = withUnsafePointer(to: &address) {$0.withMemoryRebound(to: sockaddr.self, capacity: 1) {connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))}}
         guard connected == 0 else {throw WireError.unavailable}
-        var decodeSeconds = 0.0, callSeconds = 0.0
+        var callSeconds = 0.0
         func readExact(_ count: Int) throws -> Data {
             var result = Data(count: count)
             try result.withUnsafeMutableBytes { raw in
@@ -39,13 +37,7 @@ import Darwin
                 var i = 0
                 while i < raw.count {let n = write(fd, raw.baseAddress!.advanced(by: i), raw.count-i); guard n > 0 else {throw WireError.unavailable}; i += n}
             }
-            if !oldDecoder && !jsonOnly {return try readIPCReply(binary: op.type == "read_binary", readExact: readExact)}
-            let packet = try readExact(frameLength(readExact(4)))
-            let decodeStart = ProcessInfo.processInfo.systemUptime
-            defer {decodeSeconds += ProcessInfo.processInfo.systemUptime-decodeStart}
-            var reply = try oldDecoder ? JSONDecoder().decode(Reply.self, from: packet) : decodeReply(packet)
-            reply.binary_data = false
-            return reply
+            return try readIPCReply(binary: op.type == "read_binary", readExact: readExact)
         }
         guard let offer = try call(Operation(type: "get_offer")).offer, let file = offer.content.files?.first, let size = file.size else {throw WireError.invalid}
         try offer.validate()
@@ -58,9 +50,9 @@ import Darwin
         var hash = SHA256()
         while let bytes = try autoreleasepool(invoking: {try handle.read(upToCount: 65536)}), !bytes.isEmpty {hash.update(data: bytes)}
         let digest = hash.finalize().map {String(format: "%02x", $0)}.joined()
-        let report: [String: Any] = ["mode": oldDecoder ? "unix_hydrate_generic" : (jsonOnly ? "unix_hydrate_json" : "unix_hydrate_negotiated"), "bytes": size,
+        let report: [String: Any] = ["mode": "unix_hydrate_binary", "bytes": size,
             "seconds": seconds, "mib_per_second": Double(size)/1048576/seconds,
-            "call_seconds": callSeconds, "decode_seconds": decodeSeconds, "sha256": digest]
+            "call_seconds": callSeconds, "sha256": digest]
         print(String(data: try JSONSerialization.data(withJSONObject: report, options: .sortedKeys), encoding: .utf8)!)
     }
 }

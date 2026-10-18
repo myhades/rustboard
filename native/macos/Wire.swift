@@ -48,64 +48,23 @@ func itemID(_ offer: Offer, _ file: FileEntry) -> String {
     "rb1:\(offer.source_device):\(offer.offer_id):\(file.file_id):" + SHA256.hash(data: Data(file.version.utf8)).map {String(format: "%02x", $0)}.joined()
 }
 struct DataMessage: Decodable { let type: String; let request_id: UInt64; let offset: UInt64; let bytes: [UInt8]; let eof: Bool }
-struct Reply: Decodable { let ok: Bool; let `protocol`: UInt16; let offer: Offer?; let response: DataMessage?; var binary_data: Bool? = nil }
-// Fast path for the exact JSON emitted by Node.local_ipc's sorted Value map.
-// Other valid v1 layouts (field order, whitespace, escapes) use JSONDecoder.
-// This is an implementation optimization, not a new encoding or a weaker parser.
-func decodeReply(_ packet: Data) throws -> Reply {
+struct Reply: Decodable { let ok: Bool; let `protocol`: UInt16; let offer: Offer?; let response: DataMessage?; var offers: [Offer]? = nil }
+// JSON is only used for control and error replies. File data is binary-only.
+func decodeControlReply(_ packet: Data) throws -> Reply {
     guard !packet.isEmpty, packet.count <= frameLimit else {throw WireError.invalid}
-    let fast: Reply? = try packet.withUnsafeBytes { raw -> Reply? in
-        let input = raw.bindMemory(to: UInt8.self)
-        var i = 0
-        func whitespace() {
-            while i < input.count, input[i] == 32 || input[i] == 9 || input[i] == 10 || input[i] == 13 {i += 1}
-        }
-        func take(_ literal: StaticString) -> Bool {
-            literal.withUTF8Buffer { expected in
-                guard expected.count <= input.count - i else {return false}
-                for c in expected {guard input[i] == c else {return false}; i += 1}
-                return true
-            }
-        }
-        func number() -> UInt64? {
-            guard i < input.count, input[i] >= 48, input[i] <= 57 else {return nil}
-            let first = i
-            var value: UInt64 = 0
-            while i < input.count, input[i] >= 48, input[i] <= 57 {
-                let digit = UInt64(input[i] - 48)
-                guard value <= (UInt64.max - digit) / 10 else {return nil}
-                value = value * 10 + digit; i += 1
-            }
-            guard i - first == 1 || input[first] != 48 else {return nil}
-            return value
-        }
-        guard take("{\"ok\":true,\"protocol\":1,\"response\":{\"bytes\":[") else {return nil}
-        var bytes = [UInt8](); bytes.reserveCapacity(65536)
-        whitespace()
-        if i < input.count, input[i] != 93 {
-            while true {
-                whitespace()
-                guard bytes.count < 65536, let n = number(), n <= 255 else {throw WireError.invalid}
-                bytes.append(UInt8(n))
-                whitespace()
-                guard i < input.count else {throw WireError.invalid}
-                if input[i] != 44 {break}
-                i += 1
-            }
-        }
-        guard i < input.count, input[i] == 93 else {throw WireError.invalid}
-        guard take("],\"eof\":") else {return nil}
-        let eof: Bool
-        if i < input.count, input[i] == 116 {guard take("true") else {return nil}; eof = true}
-        else {guard take("false") else {return nil}; eof = false}
-        guard take(",\"offset\":"), let offset = number(),
-              take(",\"request_id\":"), let requestID = number(),
-              take(",\"type\":\"data\"}}"), i == input.count else {return nil}
-        return Reply(ok: true, protocol: 1, offer: nil,
-            response: DataMessage(type: "data", request_id: requestID, offset: offset, bytes: bytes, eof: eof))
-    }
-    if let fast {return fast}
     return try JSONDecoder().decode(Reply.self, from: packet)
+}
+extension Reply {
+    init(from decoder: Decoder) throws {
+        try checkKeys(decoder,["ok","protocol","offer","offers","request_id","code","error"])
+        let c=try decoder.container(keyedBy:CodingKeys.self)
+        ok=try c.decode(Bool.self,forKey:.ok)
+        `protocol`=try c.decode(UInt16.self,forKey:.protocol)
+        offer=try c.decodeIfPresent(Offer.self,forKey:.offer)
+        response=nil
+        offers=try c.decodeIfPresent([Offer].self,forKey:.offers)
+    }
+    private enum CodingKeys:String,CodingKey {case ok,`protocol`,offer,offers}
 }
 struct Operation: Encodable {
     let type: String
@@ -128,11 +87,15 @@ func frameLength(_ bytes: Data) throws -> Int {
     let n = bytes.reduce(UInt32(0)) {($0 << 8) | UInt32($1)}
     guard n > 0, n <= frameLimit else {throw WireError.invalid}; return Int(n)
 }
-// Binary data is accepted only in response to an explicitly negotiated read_binary.
+// File reads require binary data; JSON errors remain explicit failures.
 func readIPCReply(binary: Bool, readExact: (Int) throws -> Data) throws -> Reply {
     let prefix = try readExact(4)
     let size = prefix.reduce(UInt32(0)) {($0 << 8) | UInt32($1)}
-    if size & 0x80000000 == 0 { return try decodeReply(readExact(frameLength(prefix))) }
+    if size & 0x80000000 == 0 {
+        let reply=try decodeControlReply(readExact(frameLength(prefix)))
+        guard !binary || !reply.ok else {throw WireError.invalid}
+        return reply
+    }
     let count = Int(size & 0x7fffffff)
     guard binary, count >= 17, count <= 65536 + 17 else {throw WireError.invalid}
     let data = try readExact(count)
@@ -192,6 +155,12 @@ func currentOffer(profile: String = ProcessInfo.processInfo.environment["RUSTBOA
     let offer = try ipc(Operation(type: "get_offer"), profile: profile).offer
     try offer?.validate(); return offer
 }
+func fileOffer(_ id: String, profile: String) throws -> Offer? {
+    try ipc(Operation(type: "get_file_offer", offer_id: id), profile: profile).offer
+}
+func fileOffers(profile: String) throws -> [Offer] {
+    try ipc(Operation(type: "get_file_offers"), profile: profile).offers ?? []
+}
 // Injectable transport makes faults and cancellation testable without a second protocol.
 func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
              call: (Operation) throws -> Reply = ipc,
@@ -203,23 +172,20 @@ func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
     defer {close(fd); if !success {unlink(url.path)} }
     guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {throw SecurityFailure.stage("hydrate_lock", errno)}
     let requestID = UInt64.random(in: 1...UInt64.max)
-    var binaryData = false
-    func checkCurrent() throws {
+    func checkTransfer() throws {
         guard !progress.isCancelled else {throw WireError.cancelled}
-        let reply = try call(Operation(type: "get_offer"))
-        binaryData = reply.binary_data == true
+        let reply = try call(Operation(type: "get_file_offer", offer_id: offer.offer_id))
         guard reply.ok, reply.protocol == 1, let current = reply.offer, current.source_device == offer.source_device, current.offer_id == offer.offer_id,
-              current.expires_unix_ms > UInt64(Date().timeIntervalSince1970 * 1000),
               current.content.files?.contains(file) == true else {throw WireError.stale}
     }
     do {
-        try checkCurrent()
+        try checkTransfer()
         var offset: UInt64 = 0
         // Empty files still make a read to validate source identity and EOF.
         repeat {
             guard !progress.isCancelled else {throw WireError.cancelled}
             let length = UInt32(min(65536, max(1, size-offset)))
-            let reply = try autoreleasepool { try call(Operation(type: binaryData ? "read_binary" : "read", request_id: requestID, offer_id: offer.offer_id, file_id: file.file_id, version: file.version, offset: offset, length: length)) }
+            let reply = try autoreleasepool { try call(Operation(type: "read_binary", request_id: requestID, offer_id: offer.offer_id, file_id: file.file_id, version: file.version, offset: offset, length: length)) }
             guard reply.ok, reply.protocol == 1, let data = reply.response,
                   data.type == "data", data.request_id == requestID, data.offset == offset,
                   data.bytes.count <= Int(length), UInt64(data.bytes.count) <= size-offset,
@@ -233,7 +199,7 @@ func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
             offset += UInt64(data.bytes.count); progress.completedUnitCount = Int64(offset)
             guard !progress.isCancelled else {throw WireError.cancelled}
         } while offset < size
-        try checkCurrent()
+        try checkTransfer()
         guard fsync(fd) == 0, !progress.isCancelled else {throw WireError.cancelled}
         try commit(url)
         success = true
@@ -306,12 +272,7 @@ func retiredItems(profile: String, adding: [String] = [], acknowledged: UInt64? 
         let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
         guard let size = attrs[.size] as? NSNumber, size.intValue <= frameLimit else {throw WireError.invalid}
         let data = try Data(contentsOf: url)
-        if let current = try? JSONDecoder().decode(RetiredIndex.self, from: data) {index = current}
-        else {
-            let legacy = try JSONDecoder().decode([String].self, from: data)
-            index.generation = 1
-            for id in legacy {index.entries[id] = 1}
-        }
+        index = try JSONDecoder().decode(RetiredIndex.self, from: data)
     }
     if let acknowledged, acknowledged <= index.generation {
         index.entries = index.entries.filter {$0.value > acknowledged}

@@ -1,6 +1,51 @@
-# Rustboard 续开发记录 — 2026-10-17
+# Rustboard 续开发记录 — 2026-10-18
 
-## CLI 收敛与交互配对（最新）
+## 当前收尾结果（覆盖以下阶段记录）
+
+两端 transfer-lifetime 修复版已安装，Mac 用户签名通过，身份/配对保持。Windows 13 core+1 vector+9 platform、Clippy 通过；Mac 同版空闲 TLS 回归和构建通过（此前完整 Rust/Swift 套件通过）。真机 Mac→Windows 进程外 COM：两个 4 KiB，首读256字节后等待7秒、文本覆盖两端剪贴板，再读完原批次，包括覆盖后才打开第二个流，全部字节校验通过。Windows→Mac 用户 Finder Cmd+V：两份4KiB目标内容与哈希通过。文本替换后 Mac presented-batches 自动归零，清理通过。原始证据 docs/test-results/transfer-lifetime/。
+
+仍未覆盖 Finder 复制中途替换、并发取消、Handoff、性能或10G。未在热点传输大测试文件。Handoff仅调研，未加功能或私有API；见 docs/TRANSFER_LIFETIME.md。
+
+临时 SSH 反向转发已停止。Mac 恢复旧监听地址无法绑定，已纠正并成功 reload：Mac listen=10.0.2.2:45452、peer=原192.168.100.6:45451；Windows listen=192.168.100.6:45451、peer=10.0.2.2:45452。两端服务保持启用。Mac主动回连Windows路由不通，需后续网络配置，不能声称当前跨热点双向文件传输可用。旧配置/受保护凭据备份仅在各端忽略的test-output中。不得恢复Mac旧监听地址直到它回到原局域网。
+
+以下最新实测修复与连接章节为本轮过程记录，当前状态以上段为准。
+
+## 最新实测修复（2026-10-18）
+
+两个 4 KiB 真机 COM 探针首读成功；Windows 替换为文本并确认 Mac AppKit 收到后，旧流继续失败（0x8003001E）。ready-1 到 continue-1 相隔 23 秒，发现客户端复用的 TLS 连接已超过服务端 5 秒空闲超时。transport ReadConnection 新增 last_request，超过 4 秒在下次网络读取前重连，保留有界预读缓存、重新 TLS 验证，不自动重试失败请求、不新增协议兼容。Windows core 13+vector1、Clippy、release 构建通过并已安装；Mac 同一真实 TLS 空闲断开回归通过，release 构建完成，仅更新候选 bin，等待用户再次本地 sign.sh。尚未安装这次 Mac 修复/真机复测/提交推送。SSH 转发仍 session 24169，先前 probe session 3951 已失败退出。下一轮用 fresh ready-2/continue-2，需重新 Finder Cmd+C；首读后主动等待至少 6 秒再替换文本并继续，验证修复。所有跨机器主体仍限制两个 4 KiB。
+
+## 最新连接与验收约束（2026-10-18）
+
+Mac 在外地，通过 WireGuard 10.0.2.2 可达。用户明确禁止大文件测试，当前为热点链路。SSH 使用原别名加 -o Hostname=10.0.2.2 -o HostKeyAlias=192.168.100.4，已验证原主机身份。不要修改系统防火墙或跑吞吐测试。只传源码差异（首包 101558 字节），CARGO_NET_OFFLINE=true，Mac 使用现有 release 缓存。
+
+transfer-lifetime/repo 已在 Mac 创建，Rust 13 core + 1 vector + 5 platform 全通过；宿主/扩展构建通过，Swift ProtocolVectors/BinaryFraming/ProviderMetadata 全通过。Mac IPC 旧到期断言已修正为活动批次继续可读、显式撤销后失败。未运行 LargeHydration 或跨热点大文件测试。用户已签名，app/Agent/CLI 严格签名验证通过；两端候选已安装，身份与配对指纹保持不变。reload 已实测。临时测试地址：Windows peer=10.0.2.2:45452；Mac listen=10.0.2.2:45452、peer=127.0.0.1:48551，SSH -R 127.0.0.1:48551:192.168.100.6:45451（当前 exec session 24169）。原配置备份在各自 test-output/transfer-lifetime/evidence/config-before.json，含受保护凭据，不提交。旧宿主 revoke 已在安装前执行。已打开 Mac mac-source，等待用户复制两个 4 KiB 文件进行进程外 COM 中途替换测试。
+
+Windows small_batch_probe 已构建、Clippy 通过：只接受 tiny-a.bin/tiny-b.bin 两份 4096 字节 i%251 合成文件，先读 256 字节，写 ready marker，等 continue marker 后读完并校验两文件。总主体 8192 字节，拒绝其他大小/文件名。该探针测试真实进程外 IDataObject/IStream，不能冒充 Explorer GUI。
+
+Mac -> 192.168.100.6:45451 TCP 探测超时；后续可用临时 SSH 反向转发连接 Windows 原监听地址（仍保留 Rustboard TLS 验证），记录这是转发路径，不是直连或性能验收。签名前后两边原身份/配对必须核对；地址若临时改动需保存原配置以便恢复。未提交推送，Handoff 桥接仍待本轮真机通过后研究。
+
+
+## 进行中：复制生命周期分离（2026-10-18，未部署/未提交）
+
+当前工作区已实现有界文件批次保留、活动读取续期、按批次查询 IPC、Mac 内部批次目录/延迟驱逐，以及 clock.json 旧整数格式分支清理。reload 也在共享 CLI 中；之前仅 Windows CLI 已安装。详见 docs/TRANSFER_LIFETIME.md。保留现有身份和配对；不要把候选实现标成真机通过。
+
+Windows 13 core + 1 vector + 9 platform 测试、fmt/Clippy 通过，包括 COM 经真实 loopback TLS 在新文件/文本替换后读完两份旧文件。Mac SSH 192.168.100.4:22 连接超时，已请求用户恢复唤醒/网络。尚未构建 Swift、请求本轮签名、更新两端安装或完成 Explorer/Finder 真机回归，因此未提交推送。Mac 恢复后创建独立 transfer-lifetime 构建目录；复用既有 Rust release 缓存，不能覆盖已签名 current-only 目录。用户本地签名后再安装。
+
+这轮真机成功后再研究 Handoff 桥接；用户提出 peers 中同 Apple ID 且启用通用剪贴板的 Mac 最多一台。该限制是部署约束，不是自动识别 Apple ID 或防回环机制。
+
+
+## 当前实现清理（当前状态，覆盖以下历史记录）
+
+已删除旧 TLS ALPN、JSON 文件数据回退、本地 IPC read/capability 分支、旧配置与 identity/peers 文件迁移、旧 retired 缓存转换，以及旧 CLI 内部入口。仅接受 rustboard/2、read_binary 和当前 schema-2 config。protocol:1 只是当前控制消息结构标记，不表示支持另一套传输。
+
+两端当前身份和配对保持原样；Windows 使用 DPAPI，Mac 使用 Keychain。新安装的显式空 identity 才初始化设备身份，凭据读取失败不会生成替代身份。Mac 当前用户签名构建目录为 test-output/current-only/repo，已安装到日常路径；禁止代理调用个人开发者私钥。
+
+两端 Rust、Swift 帧/协议与故障测试、Windows fmt/Clippy、隔离 CLI 配对回归及安装后双向 Unicode 文本通过。文件原生回归与提交状态以本节后续记录和 docs/PROTOTYPE_RESULTS.md 为准。两边日常服务及登录启动继续启用。
+
+以下章节是按开发阶段保留的历史记录，旧迁移、旧协议、暂停命令、测试进程清理和不推送说明均不代表当前实现或当前用户授权。
+
+
+## CLI 收敛与交互配对（历史）
 
 两端安装版已更新。公开命令：status/start/stop/restart/config/pair/unpair，标准 --help/--version；status --json 用于脚本。start 立即启动并启用登录启动；stop 立即停止并禁用登录启动，Mac 不再被 KeepAlive 拉起。pause/resume/mode/peers/doctor 不再作为公开命令；mode 在 config 中设置，旧 paused 字段启动时移除。
 
@@ -11,7 +56,7 @@ Windows 和 Mac 已实测停止/禁用自启、启动/启用、重启。已撤�
 状态不冒充持续连接健康探测；整机重启/登录未测试。两边保持服务和登录启动启用。验收见 docs/test-results/cli/ 和 docs/PROTOTYPE_RESULTS.md。未自动推送。
 
 
-## 单配置与系统私钥存储（最新）
+## 单配置与系统私钥存储（历史）
 
 Windows 正式安装已迁移为 schema-2 config.json，包含 peers 和 DPAPI 加密私钥；原 identity.json / peers.json 已移除，指纹与配对保留。所有配置修改（含 CLI pair/unpair/pause/resume/mode）均需手动重启，返回 restart_required，status/peers 显示运行状态。当前正常同步。
 

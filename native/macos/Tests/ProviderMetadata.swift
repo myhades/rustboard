@@ -13,6 +13,13 @@ import FileProvider
         let changed = try snapshotAnchor(Array(all.dropLast()))
         precondition(changed != anchor)
         precondition(Set(all.map {$0.itemIdentifier}).count == 256)
+        let other = Offer(protocol: 1, source_device: offer.source_device, offer_id: UUID().uuidString, event_sequence: 2, expires_unix_ms: offer.expires_unix_ms, content: offer.content)
+        let first = Item(offer, files[0]), second = Item(other, files[0])
+        precondition(first.filename == second.filename)
+        precondition(first.parentItemIdentifier != second.parentItemIdentifier)
+        precondition(first.parentItemIdentifier == Item(offer).itemIdentifier)
+        precondition(Item(offer).parentItemIdentifier == .rootContainer)
+        print("PASS same-name files isolated by batch directory")
         print("PASS 256-file metadata: stable 32-byte anchor, changes detectable, unique item IDs")
     }
 }

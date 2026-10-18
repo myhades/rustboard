@@ -28,12 +28,12 @@ if a.action=='prepare':
     try:
         for attempt in range(50):
             if agent.poll() is not None:raise RuntimeError('Agent exited; inspect agent.txt')
-            try:doctor=control('status','--json');break
+            try:status=control('status','--json');break
             except subprocess.CalledProcessError:time.sleep(.1)
         else:raise RuntimeError('Agent did not start')
         for name in ['command.txt','peer-pin.txt']:(out/name).unlink(missing_ok=True)
         with (out/'peer.txt').open('w') as log:
-            peer=subprocess.Popen([str(root/'target/release/examples/macos_acceptance_peer'),doctor['fingerprint'],'45441','45442',str(out)],env=dict(env,RUSTBOARD_TEST_SIZES=a.sizes),stdout=log,stderr=log,start_new_session=True)
+            peer=subprocess.Popen([str(root/'target/release/examples/macos_acceptance_peer'),status['fingerprint'],'45441','45442',str(out)],env=dict(env,RUSTBOARD_TEST_SIZES=a.sizes),stdout=log,stderr=log,start_new_session=True)
         for attempt in range(50):
             if (out/'peer-pin.txt').exists():break
             if peer.poll() is not None:raise RuntimeError('Peer exited')
@@ -52,7 +52,7 @@ if a.action=='prepare':
             try:control('status','--json');break
             except subprocess.CalledProcessError:time.sleep(.1)
         else:raise RuntimeError('Configured Agent did not restart')
-        (out/'session.json').write_text(json.dumps({'agent_pid':agent.pid,'peer_pid':peer.pid,'profile':'acceptance','agent_fingerprint':doctor['fingerprint'],'peer_fingerprint':pin},indent=2))
+        (out/'session.json').write_text(json.dumps({'agent_pid':agent.pid,'peer_pid':peer.pid,'profile':'acceptance','agent_fingerprint':status['fingerprint'],'peer_fingerprint':pin},indent=2))
         (out/'sizes.txt').write_text(a.sizes)
         (out/'ttl-ms.txt').write_text(str(a.ttl_ms))
         write_command('files')

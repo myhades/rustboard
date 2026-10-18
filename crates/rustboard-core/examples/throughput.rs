@@ -72,7 +72,7 @@ fn main() -> anyhow::Result<()> {
                         "corrupt data"
                     );
                 } else {
-                    let reply = b.local_ipc(IpcOperation::Read {
+                    let reply = b.local_ipc(IpcOperation::ReadBinary {
                         request_id: offset / 65536,
                         offer_id: offer.offer_id.clone(),
                         file_id: file.file_id.clone(),
@@ -157,12 +157,12 @@ fn socket_probe(
         let request: IpcRequest = read_frame(&mut stream)?;
         anyhow::ensure!(request.protocol == 1, "protocol");
         let done = matches!(request.request, IpcOperation::Cancel { .. });
-        let binary = matches!(request.request, IpcOperation::ReadBinary { .. });
+
         let start = Instant::now();
         let reply = node.local_ipc_reply(request.request)?;
         node_seconds += start.elapsed().as_secs_f64();
         let start = Instant::now();
-        write_ipc_reply(&mut stream, &reply, binary)?;
+        write_ipc_reply(&mut stream, &reply)?;
         write_seconds += start.elapsed().as_secs_f64();
         requests += 1;
         if done {

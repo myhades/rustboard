@@ -13,32 +13,45 @@ func finish(_ error:Error?) {
     }
     exit(error == nil ? 0 : 1)
 }
-func indexURL() throws -> URL {try groupDirectory().appendingPathComponent(profile).appendingPathComponent("presented.json")}
-func saveIndex(_ offer: Offer) throws {
-    let data=try JSONEncoder().encode(offer)
+func indexURL() throws -> URL {try groupDirectory().appendingPathComponent(profile).appendingPathComponent("presented-batches.json")}
+func readIndex() throws -> [Offer] {
     let url=try indexURL()
-    try data.write(to:url,options:[.atomic])
+    guard FileManager.default.fileExists(atPath:url.path) else {return []}
+    let attrs=try FileManager.default.attributesOfItem(atPath:url.path)
+    guard (attrs[.size] as? NSNumber)?.intValue ?? Int.max <= frameLimit else {throw WireError.invalid}
+    return try JSONDecoder().decode([Offer].self,from:Data(contentsOf:url))
+}
+func writeIndex(_ offers: [Offer]) throws {
+    let data=try JSONEncoder().encode(offers)
+    guard data.count <= frameLimit else {throw WireError.invalid}
+    let url=try indexURL();try data.write(to:url,options:[.atomic])
     guard chmod(url.path,0o600)==0 else {throw WireError.unavailable}
 }
+func saveIndex(_ offer: Offer) throws {
+    var offers=try readIndex();offers.removeAll {$0.offer_id == offer.offer_id};offers.append(offer)
+    try writeIndex(offers)
+}
+// Only expired batches are retired. New clipboard contents never evict live files.
 func evictPrevious(_ completion:@escaping(Error?)->Void) {
     do {
-        let url=try indexURL()
-        guard FileManager.default.fileExists(atPath:url.path) else {completion(nil);return}
-        let attrs=try FileManager.default.attributesOfItem(atPath:url.path)
-        guard (attrs[.size] as? NSNumber)?.intValue ?? Int.max <= frameLimit else {throw WireError.invalid}
-        let offer=try JSONDecoder().decode(Offer.self,from:Data(contentsOf:url))
-        _ = try retiredItems(profile: profile, adding: (offer.content.files ?? []).map {itemID(offer, $0)})
+        let old=try readIndex()
+        guard !old.isEmpty else {completion(nil);return}
+        let retained=Set(try fileOffers(profile:profile).map {$0.offer_id})
+        let expired=old.filter {!retained.contains($0.offer_id)}
+        guard !expired.isEmpty else {completion(nil);return}
+        let deleted=expired.flatMap {o in (o.content.files ?? []).map {itemID(o,$0)} + ["batch:" + o.offer_id]}
+        _ = try retiredItems(profile:profile,adding:deleted)
         guard let manager=NSFileProviderManager(for:domain) else {throw WireError.unavailable}
         let group=DispatchGroup(), lock=NSLock();var failed=false
-        for file in offer.content.files ?? [] {
+        for offer in expired {for file in offer.content.files ?? [] {
             group.enter();manager.evictItem(identifier:.init(itemID(offer,file))) {error in
                 if let error, (error as NSError).code != NSFileProviderError.noSuchItem.rawValue {lock.lock();failed=true;lock.unlock()}
                 group.leave()
             }
-        }
+        }}
         group.notify(queue:.main) {
             if failed {completion(WireError.unavailable);return}
-            do {try FileManager.default.removeItem(at:url);manager.signalEnumerator(for:.rootContainer) {_ in manager.signalEnumerator(for:.workingSet,completionHandler:completion)}} catch {completion(error)}
+            do {try writeIndex(old.filter {retained.contains($0.offer_id)});manager.signalEnumerator(for:.rootContainer) {_ in manager.signalEnumerator(for:.workingSet,completionHandler:completion)}} catch {completion(error)}
         }
     } catch {completion(error)}
 }

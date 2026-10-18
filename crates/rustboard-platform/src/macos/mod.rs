@@ -165,6 +165,7 @@ pub fn run() -> Result<()> {
     let mut backend = MacBackend { node: node.clone() };
     let _ = host_command(&["revoke"]);
     let mut presented: Option<String> = None;
+    let mut last_prune = std::time::Instant::now();
     while !node.stop.load(Ordering::Acquire) {
         unsafe {
             rb_pump();
@@ -186,7 +187,7 @@ pub fn run() -> Result<()> {
                 ),
                 Some("image") => {
                     if engine.paused || engine.text_only {
-                        engine.withdraw();
+                        engine.clear_clipboard();
                         continue;
                     }
                     let stem =
@@ -203,12 +204,12 @@ pub fn run() -> Result<()> {
                     local_files::offer(&mut engine, paths, &snapshots)
                 }
                 _ => {
-                    engine.withdraw();
+                    engine.clear_clipboard();
                     continue;
                 }
             };
             if result.is_err() {
-                engine.withdraw();
+                engine.clear_clipboard();
                 eprintln!("clipboard capture rejected");
             } else {
                 if value["kind"] == "image" {
@@ -226,10 +227,11 @@ pub fn run() -> Result<()> {
             .current
             .as_ref()
             .map(|o| o.offer_id.clone());
+        if last_prune.elapsed() >= std::time::Duration::from_secs(10) {
+            let _ = host_command(&["revoke"]);
+            last_prune = std::time::Instant::now();
+        }
         if presented.is_some() && presented != current_id {
-            if host_command(&["revoke"]).is_err() {
-                eprintln!("provider eviction failed");
-            }
             unsafe {
                 rb_clear_owned();
             }

@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     path::PathBuf,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 pub fn now_ms() -> u64 {
@@ -17,6 +17,17 @@ pub fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
+// A short handoff grace bridges native descriptor acquisition and the first read.
+// Reads renew the whole batch so sequential files survive clipboard replacement.
+const HANDOFF_GRACE: Duration = Duration::from_secs(30);
+const TRANSFER_IDLE: Duration = Duration::from_secs(120);
+const MAX_BATCHES: usize = 8;
+struct FileBatch {
+    offer: Offer,
+    sources: HashMap<String, Arc<dyn ReadAt>>,
+    retired: Option<Instant>,
+    active_until: Option<Instant>,
+}
 pub struct Engine {
     pub device_id: String,
     pub paused: bool,
@@ -25,7 +36,7 @@ pub struct Engine {
     clock_path: Option<PathBuf>,
     watermark: Option<(u64, String, String)>,
     pub current: Option<Offer>,
-    sources: HashMap<String, Arc<dyn ReadAt>>,
+    batches: HashMap<String, FileBatch>,
     pub accepted: u64,
 }
 impl Engine {
@@ -38,19 +49,21 @@ impl Engine {
             clock_path: None,
             watermark: None,
             current: None,
-            sources: HashMap::new(),
+            batches: HashMap::new(),
             accepted: 0,
         }
     }
     pub fn persist_clock(&mut self, path: PathBuf) -> Result<()> {
         if path.exists() {
-            let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
-            if let Some(clock) = value.as_u64() {
-                self.clock = clock;
-            } else {
-                self.clock = serde_json::from_value(value["clock"].clone())?;
-                self.watermark = serde_json::from_value(value["watermark"].clone())?;
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Clock {
+                clock: u64,
+                watermark: Option<(u64, String, String)>,
             }
+            let value: Clock = serde_json::from_slice(&std::fs::read(&path)?)?;
+            self.clock = value.clock;
+            self.watermark = value.watermark;
         }
         self.clock_path = Some(path);
         Ok(())
@@ -70,7 +83,98 @@ impl Engine {
     }
     pub fn withdraw(&mut self) {
         self.current = None;
-        self.sources.clear();
+        self.batches.clear();
+    }
+    /// Clipboard replacement is not explicit transfer revocation.
+    pub fn clear_clipboard(&mut self) {
+        self.retire_current();
+        self.current = None;
+    }
+    fn retire_current(&mut self) {
+        if let Some(batch) = self
+            .current
+            .as_ref()
+            .and_then(|o| self.batches.get_mut(&o.offer_id))
+        {
+            batch.retired.get_or_insert(Instant::now());
+        }
+    }
+    fn register_batch(
+        &mut self,
+        offer: &Offer,
+        sources: HashMap<String, Arc<dyn ReadAt>>,
+    ) -> Result<()> {
+        self.expire();
+        if matches!(offer.content, Content::Files { .. }) {
+            ensure!(
+                self.batches.len() < MAX_BATCHES,
+                "file transfer capacity reached"
+            );
+            // Bound retained metadata as well as the number of stable-source handles.
+            let size = serde_json::to_vec(offer)?.len();
+            let total: usize = self
+                .batches
+                .values()
+                .map(|b| serde_json::to_vec(&b.offer).map(|v| v.len()))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .sum();
+            ensure!(
+                size + total < MAX_FRAME / 2,
+                "file metadata capacity reached"
+            );
+            self.batches.insert(
+                offer.offer_id.clone(),
+                FileBatch {
+                    offer: offer.clone(),
+                    sources,
+                    retired: None,
+                    active_until: None,
+                },
+            );
+        }
+        self.retire_current();
+        Ok(())
+    }
+    pub fn retained_offers(&mut self) -> Vec<Offer> {
+        self.expire();
+        self.batches.values().map(|b| b.offer.clone()).collect()
+    }
+    pub fn file_offer(&mut self, id: &str) -> Result<Offer> {
+        self.expire();
+        ensure!(!self.paused, "paused");
+        Ok(self
+            .batches
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("file offer expired"))?
+            .offer
+            .clone())
+    }
+    pub fn touch_file(
+        &mut self,
+        device: &str,
+        offer: &str,
+        file: &str,
+        version: &str,
+    ) -> Result<()> {
+        self.expire();
+        ensure!(!self.paused, "paused");
+        let batch = self
+            .batches
+            .get_mut(offer)
+            .ok_or_else(|| anyhow::anyhow!("file offer expired"))?;
+        ensure!(batch.offer.source_device == device, "source mismatch");
+        let Content::Files { files } = &batch.offer.content else {
+            anyhow::bail!("not files")
+        };
+        ensure!(
+            files
+                .iter()
+                .any(|f| f.file_id == file && f.version == version),
+            "file/version mismatch"
+        );
+        batch.active_until = Some(Instant::now() + TRANSFER_IDLE);
+        Ok(())
     }
     pub fn local(
         &mut self,
@@ -95,6 +199,7 @@ impl Engine {
             content,
         };
         offer.validate(now_ms())?;
+        self.register_batch(&offer, sources)?;
         self.watermark = Some((
             offer.event_sequence,
             offer.source_device.clone(),
@@ -102,7 +207,6 @@ impl Engine {
         ));
         self.save_clock()?;
         self.current = Some(offer.clone());
-        self.sources = sources;
         Ok(offer)
     }
     pub fn files(&mut self, paths: Vec<PathBuf>) -> Result<Offer> {
@@ -146,13 +250,13 @@ impl Engine {
         }) {
             return Ok(false);
         }
+        self.register_batch(&offer, HashMap::new())?;
         self.watermark = Some((
             offer.event_sequence,
             offer.source_device.clone(),
             offer.offer_id.clone(),
         ));
         self.save_clock()?;
-        self.sources.clear();
         self.current = Some(offer);
         self.accepted += 1;
         Ok(true)
@@ -163,9 +267,15 @@ impl Engine {
             .as_ref()
             .is_some_and(|o| o.expires_unix_ms <= now_ms())
         {
-            self.current = None;
-            self.sources.clear();
+            self.clear_clipboard();
         }
+        let now = Instant::now();
+        self.batches.retain(|_, b| {
+            b.active_until.is_some_and(|until| until > now)
+                || b.retired.map_or(b.offer.expires_unix_ms > now_ms(), |at| {
+                    now.duration_since(at) < HANDOFF_GRACE
+                })
+        });
     }
     pub fn source(
         &mut self,
@@ -174,28 +284,12 @@ impl Engine {
         file: &str,
         version: &str,
     ) -> Result<Arc<dyn ReadAt>> {
-        self.expire();
-        ensure!(!self.paused, "paused");
-        let current = self
-            .current
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("expired"))?;
-        ensure!(
-            current.source_device == self.device_id
-                && device == self.device_id
-                && current.offer_id == offer,
-            "unknown offer"
-        );
-        let Content::Files { files } = &current.content else {
-            anyhow::bail!("not file offer");
-        };
-        ensure!(
-            files
-                .iter()
-                .any(|f| f.file_id == file && f.version == version),
-            "version or file mismatch"
-        );
+        ensure!(device == self.device_id, "source is not local");
+        self.touch_file(device, offer, file, version)?;
         Ok(self
+            .batches
+            .get(offer)
+            .unwrap()
             .sources
             .get(file)
             .ok_or_else(|| anyhow::anyhow!("not found"))?
@@ -206,6 +300,111 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn batch(engine: &mut Engine) -> Offer {
+        let files: Vec<_> = (0..2)
+            .map(|_| FileEntry {
+                file_id: new_id(),
+                relative_path: new_id(),
+                size: Some(4),
+                version: "v".into(),
+                media_type: "application/octet-stream".into(),
+            })
+            .collect();
+        let sources = files
+            .iter()
+            .map(|f| {
+                (
+                    f.file_id.clone(),
+                    Arc::new(PatternSource::new(4)) as Arc<dyn ReadAt>,
+                )
+            })
+            .collect();
+        engine.local(Content::Files { files }, sources).unwrap()
+    }
+    #[test]
+    fn batch_survives_clipboard_changes_and_expires_after_idle() {
+        let mut e = Engine::new(new_id());
+        let first = batch(&mut e);
+        let Content::Files { files } = &first.content else {
+            panic!()
+        };
+        e.source(
+            &first.source_device,
+            &first.offer_id,
+            &files[0].file_id,
+            "v",
+        )
+        .unwrap();
+        let second = batch(&mut e);
+        e.local(
+            Content::Text {
+                text: "new clipboard".into(),
+            },
+            HashMap::new(),
+        )
+        .unwrap();
+        // Old offer TTL and descriptor grace no longer cancel an active batch.
+        let b = e.batches.get_mut(&first.offer_id).unwrap();
+        b.retired = Some(Instant::now() - HANDOFF_GRACE - Duration::from_secs(1));
+        b.offer.expires_unix_ms = 0;
+        let source = e
+            .source(
+                &first.source_device,
+                &first.offer_id,
+                &files[1].file_id,
+                "v",
+            )
+            .unwrap();
+        let mut bytes = [0; 4];
+        assert_eq!(source.read_at(0, &mut bytes).unwrap(), 4);
+        assert_eq!(bytes, [0, 1, 2, 3]);
+        assert!(e.file_offer(&second.offer_id).is_ok());
+        e.batches.get_mut(&first.offer_id).unwrap().active_until =
+            Some(Instant::now() - Duration::from_secs(1));
+        assert!(e.file_offer(&first.offer_id).is_err());
+        assert!(
+            matches!(&e.current.as_ref().unwrap().content, Content::Text { text } if text == "new clipboard")
+        );
+    }
+    #[test]
+    fn capacity_never_evicts_active_batches_and_withdraw_revokes() {
+        let mut e = Engine::new(new_id());
+        for _ in 0..MAX_BATCHES {
+            batch(&mut e);
+        }
+        let current = e.current.clone();
+        let result = e.local(
+            Content::Files {
+                files: vec![FileEntry {
+                    file_id: new_id(),
+                    relative_path: "full".into(),
+                    size: Some(0),
+                    version: "v".into(),
+                    media_type: "application/octet-stream".into(),
+                }],
+            },
+            HashMap::new(),
+        );
+        assert!(result.is_err());
+        assert_eq!(e.current, current);
+        assert_eq!(e.batches.len(), MAX_BATCHES);
+        e.local(
+            Content::Text {
+                text: "still usable".into(),
+            },
+            HashMap::new(),
+        )
+        .unwrap();
+        e.withdraw();
+        assert!(e.retained_offers().is_empty());
+    }
+    #[test]
+    fn old_integer_clock_is_rejected() {
+        let path = std::env::temp_dir().join(new_id());
+        std::fs::write(&path, b"123").unwrap();
+        assert!(Engine::new(new_id()).persist_clock(path.clone()).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
     #[test]
     fn restart_preserves_sequence_and_replay_watermark() {
         let path = std::env::temp_dir().join(format!("rustboard-clock-{}.json", new_id()));

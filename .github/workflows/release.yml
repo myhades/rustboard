@@ -1,16 +1,11 @@
 name: Release
 on:
-  push:
-    tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing version tag (v + Cargo version)
-        required: true
+  release:
+    types: [published]
 permissions:
   contents: read
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-${{ github.event.release.tag_name }}
   cancel-in-progress: false
 jobs:
   build:
@@ -20,11 +15,11 @@ jobs:
         os: [windows-2022, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:
@@ -73,12 +68,12 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -94,16 +89,14 @@ jobs:
           python scripts/release-manifests.py --tag "$RELEASE_TAG" --assets assets --output manifests
           cp manifests/Casks/rustboard.rb assets/
           tar -czf assets/package-manifests.tar.gz -C manifests .
-      - name: Publish complete release
+      - name: Upload assets to the explicitly published release
         run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Release already exists; do not replace published immutable assets."
+          count=$(gh release view "$RELEASE_TAG" --json assets --jq '.assets | length')
+          if [[ "$count" != 0 ]]; then
+            echo "Release already has assets; do not overwrite published files."
             exit 1
           fi
-          args=()
-          if [[ "$RELEASE_TAG" == *-* ]]; then args+=(--prerelease); fi
-          gh release create "$RELEASE_TAG" assets/* --draft --verify-tag --title "Rustboard $RELEASE_TAG" --notes-file docs/RELEASE-NOTES.md "${args[@]}"
-          gh release edit "$RELEASE_TAG" --draft=false
+          gh release upload "$RELEASE_TAG" assets/*
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: package-manifests

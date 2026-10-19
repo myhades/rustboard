@@ -1,5 +1,8 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: ["**"]
+  pull_request:
 permissions:
   contents: read
 jobs:
@@ -23,14 +26,4 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: python scripts/check-vectors.py
       - if: runner.os == 'macOS'
-        run: bash platforms/macos/scripts/test.sh && bash platforms/macos/scripts/build.sh && bash platforms/macos/scripts/test-install.sh
-      - if: runner.os != 'macOS'
-        run: cargo build --release --locked
-      - if: runner.os == 'Windows'
-        run: ./platforms/windows/scripts/package.ps1 -OutputRoot target/release-assets
-      - if: runner.os == 'Windows'
-        run: |
-          $version=(cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
-          python scripts/release-manifests.py --windows-only --tag "v$version" --assets target/release-assets --output target/manifests
-      - if: runner.os == 'Windows'
-        run: ./platforms/windows/scripts/test-scoop.ps1
+        run: bash platforms/macos/scripts/test.sh

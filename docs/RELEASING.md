@@ -1,6 +1,9 @@
 # Release automation
 
-CI checks Windows, both macOS CPU architectures, and portable Linux code. No Linux
+Branch pushes and pull requests run tests, formatting and clippy on Windows,
+both macOS CPU architectures, and portable Linux code. They do not build release
+binaries, package installers, sign code, publish assets or update manifests.
+Test executables and native test helpers are compiled only as needed to run tests. No Linux
 clipboard backend or package is introduced. Rust is pinned in rust-toolchain.toml
 and workflows; dependencies use Cargo.lock. macOS binaries target macOS 13.0.
 
@@ -56,21 +59,26 @@ there is no notarization request. An expired/revoked certificate fails the job.
 ## Publishing
 
 1. Set Cargo.toml version and update Cargo.lock. Review docs/RELEASE-NOTES.md.
-2. Push the tested commit, then create and push `v<exact Cargo version>`.
+2. Push the tested commit and create its `v<exact Cargo version>` tag. Explicitly
+   publish a new GitHub Release for that tag to start release builds. Pushing a
+   tag alone does not start release builds.
 3. Release builds test and package Windows x64, macOS arm64 and x86_64. Windows
    uses Scoop with the existing vendor scripts; a disposable runner tests actual
    bucket install, disabled-service update, identity preservation and uninstall.
-4. Only after all builds pass, publish archives, SHA-256 sidecars and generated
-   manifests. Published assets are immutable; use a new version to fix them.
+4. Only after all builds pass, upload archives, SHA-256 sidecars and generated
+   manifests to that Release. The published Release initially has no assets while
+   builds run. Published assets are immutable; use a new version to fix them.
 5. Commit Casks/rustboard.rb and bucket/rustboard.json to main in this repository
    using GITHUB_TOKEN. Only these two generated files are staged; source and release
    tags are unchanged. No community review, WinGet or separate EXE installer.
 
-Prerelease tags (for example v0.1.1-beta.1) require the same Cargo version and
-create a GitHub prerelease; both package manifests receive that build.
-Release can also be dispatched for an existing tag. Retry failed distribution
-jobs with GitHub's **Re-run failed jobs**, rather than rebuilding published assets.
-If signing Secrets are missing, builds fail before public release creation.
+For a prerelease, explicitly publish a GitHub prerelease with a tag matching the
+Cargo version. Both published releases and prereleases trigger this workflow;
+saving a draft does not. There is no tag-push or manual-dispatch release trigger.
+Retry failed jobs with GitHub's **Re-run failed jobs**. Asset upload refuses to
+overwrite existing assets; if upload partially failed, inspect that state before
+retrying. Missing signing Secrets fail the build without uploading binaries or
+updating package manifests. The already-published Release remains visible.
 
 The main repository serves both managers. Do not add manifests with placeholder
 URLs/hashes. The first successful release creates Casks/rustboard.rb and

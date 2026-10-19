@@ -14,9 +14,24 @@ impl Channel {
         self.stream.flush()?;
         Ok(())
     }
-    pub fn receive(&mut self) -> Result<u16> {
+    pub fn receive(&mut self, active: impl Fn() -> bool) -> Result<u16> {
         let mut b = [0; 2];
-        self.stream.read_exact(&mut b)?;
+        let mut offset = 0;
+        while offset < b.len() {
+            ensure!(active(), "pairing cancelled or expired");
+            match self.stream.read(&mut b[offset..]) {
+                Ok(0) => anyhow::bail!("peer disconnected"),
+                Ok(n) => offset += n,
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::TimedOut
+                            | std::io::ErrorKind::Interrupted
+                    ) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
         Ok(u16::from_be_bytes(b))
     }
 }
@@ -59,7 +74,7 @@ pub fn connect(identity: &Identity, address: SocketAddr) -> Result<Channel> {
             .as_ref(),
     );
     // Human confirmation is bounded by the session deadline in the platform layer.
-    s.sock.set_read_timeout(Some(Duration::from_secs(120)))?;
+    s.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
     let socket = s.sock.try_clone()?;
     Ok(Channel {
         stream: Box::new(s),
@@ -95,7 +110,7 @@ pub fn accept(identity: &Identity, sock: TcpStream) -> Result<Channel> {
             .ok_or_else(|| anyhow::anyhow!("missing peer certificate"))?[0]
             .as_ref(),
     );
-    s.sock.set_read_timeout(Some(Duration::from_secs(120)))?;
+    s.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
     let socket = s.sock.try_clone()?;
     Ok(Channel {
         stream: Box::new(s),
@@ -117,13 +132,20 @@ mod tests {
         let t = std::thread::spawn(move || {
             let mut c = accept(&server_identity, listener.accept().unwrap().0).unwrap();
             assert_eq!(c.pin, expected);
-            assert_eq!(c.receive().unwrap(), 45452);
+            assert_eq!(c.receive(|| true).unwrap(), 45452);
+            std::thread::sleep(Duration::from_millis(350));
             c.send(45451).unwrap();
+            let started = std::time::Instant::now();
+            let error = c
+                .receive(|| started.elapsed() < Duration::from_millis(100))
+                .unwrap_err();
+            assert!(error.to_string().contains("pairing cancelled"));
+            assert!(started.elapsed() < Duration::from_secs(2));
         });
         let mut c = connect(&b, address).unwrap();
         assert_eq!(c.pin, a.pin());
         c.send(45452).unwrap();
-        assert_eq!(c.receive().unwrap(), 45451);
+        assert_eq!(c.receive(|| true).unwrap(), 45451);
         t.join().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();

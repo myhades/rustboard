@@ -154,6 +154,40 @@ fn disabled(output: &str) -> bool {
             name.trim() == "\"org.rustboard.agent\"" && matches!(value.trim(), "true" | "disabled")
         })
 }
+static PAIR_INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn pair_interrupt(_: libc::c_int) {
+    PAIR_INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+pub(crate) struct PairInterrupt(libc::sighandler_t);
+impl PairInterrupt {
+    pub(crate) fn install() -> Result<Self> {
+        PAIR_INTERRUPTED.store(false, std::sync::atomic::Ordering::Relaxed);
+        let previous = unsafe {
+            libc::signal(
+                libc::SIGINT,
+                pair_interrupt as *const () as libc::sighandler_t,
+            )
+        };
+        ensure!(
+            previous != libc::SIG_ERR,
+            "cannot handle interrupt: {}",
+            std::io::Error::last_os_error()
+        );
+        Ok(Self(previous))
+    }
+    pub(crate) fn interrupted(&self) -> bool {
+        PAIR_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+impl Drop for PairInterrupt {
+    fn drop(&mut self) {
+        unsafe {
+            libc::signal(libc::SIGINT, self.0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

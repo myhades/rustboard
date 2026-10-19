@@ -73,7 +73,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 if running.is_ok() {
                     "running"
                 } else {
-                    "unavailable"
+                    "stopped"
                 }
             );
             if let Ok(v) = running {
@@ -83,13 +83,6 @@ pub fn run(args: Vec<String>) -> Result<()> {
                     v["mode"].as_str().unwrap_or("unknown")
                 );
                 print_peers(&v["peers"]);
-            } else {
-                if let Ok(c) = crate::app::config::load(&ipc::data_dir()?) {
-                    print_peers(&c["peers"]);
-                }
-                println!(
-                    "  Agent is stopped or unreachable; inspect logs if startup was expected."
-                );
             }
         }
         "start" => {
@@ -189,27 +182,15 @@ fn print_peers(peers: &Value) {
     let peers = peers.as_array();
     println!("\nPeers ({})", peers.map_or(0, Vec::len));
     if let Some(peers) = peers.filter(|p| !p.is_empty()) {
-        let width = peers
-            .iter()
-            .filter_map(|p| p["address"].as_str())
-            .map(str::len)
-            .max()
-            .unwrap_or(7)
-            .max(7);
-        println!("  {:<width$}  FINGERPRINT", "ADDRESS");
         for p in peers {
-            let pin = p["fingerprint"].as_str().unwrap_or("");
-            println!(
-                "  {:<width$}  {}",
-                p["address"].as_str().unwrap_or("?"),
-                &pin[..pin.len().min(12)]
-            );
+            println!("  {}", p["address"].as_str().unwrap_or("?"));
         }
     }
 }
 fn pair(target: Option<&str>) -> Result<()> {
     ensure!(request(&["status"]).is_ok(), "not running");
     let target = target.map(address).transpose()?.map(|a| a.to_string());
+    let interrupt = service::PairInterrupt::install()?;
     let v = if let Some(a) = &target {
         request(&["pair-begin", a])?
     } else {
@@ -222,7 +203,20 @@ fn pair(target: Option<&str>) -> Result<()> {
     struct Cancel(String);
     impl Drop for Cancel {
         fn drop(&mut self) {
-            let _ = request(&["pair-cancel", &self.0]);
+            if request(&["pair-cancel", &self.0]).is_err() {
+                return;
+            }
+            // Wait until the worker releases its listener/socket before another pair can begin.
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while std::time::Instant::now() < deadline {
+                match request(&["pair-poll", &self.0]) {
+                    Ok(value) if matches!(value["phase"].as_str(), Some("failed" | "saved")) => {
+                        break;
+                    }
+                    Err(_) => break,
+                    _ => std::thread::sleep(Duration::from_millis(20)),
+                }
+            }
         }
     }
     let _guard = Cancel(id.clone());
@@ -233,6 +227,7 @@ fn pair(target: Option<&str>) -> Result<()> {
     let (tx, rx) = std::sync::mpsc::channel();
     let mut prompted = false;
     loop {
+        ensure!(!interrupt.interrupted(), "pairing cancelled");
         let v = request(&["pair-poll", &id])?;
         match v["phase"].as_str().unwrap_or("") {
             "confirm" if !prompted => {
@@ -278,6 +273,7 @@ fn pair(target: Option<&str>) -> Result<()> {
             _ => {}
         }
         if let Ok(ok) = rx.try_recv() {
+            ensure!(!interrupt.interrupted(), "pairing cancelled");
             ensure!(ok, "pairing declined");
             request(&["pair-approve", &id])?;
             println!("Confirm on the other peer...");

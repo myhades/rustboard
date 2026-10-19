@@ -19,6 +19,7 @@ Rust diagnostic executables live in tools/rust, declared as Cargo examples so th
 - `cargo run -p rustboard --example throughput -- ...`: synthetic transport benchmark; inspect arguments first.
 - Platform stream probes and Mac acceptance peer are separate examples under tools/rust/windows and tools/rust/macos.
 - `platforms/windows/scripts/prototype-clipboard.py`: synthetic text/image clipboard producer.
+- `python platforms/windows/scripts/test-cli-interrupt.py`: console Ctrl+C during pairing, immediate retries, and unchanged trust using isolated local Agents (requires release binaries).
 - `tests/support/pattern.rs` is included only by tests/examples; `tests/support/identity.rs` stores only isolated test identities. Installed identities always use native credential stores.
 
 ## Contributing

@@ -208,3 +208,36 @@ impl Drop for StandardHandles {
         }
     }
 }
+
+static PAIR_INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+unsafe extern "system" fn pair_interrupt(event: u32) -> windows::core::BOOL {
+    use windows::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT};
+    if event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT {
+        PAIR_INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
+        true.into()
+    } else {
+        false.into()
+    }
+}
+pub(crate) struct PairInterrupt;
+impl PairInterrupt {
+    pub(crate) fn install() -> Result<Self> {
+        PAIR_INTERRUPTED.store(false, std::sync::atomic::Ordering::Relaxed);
+        unsafe {
+            windows::Win32::System::Console::SetConsoleCtrlHandler(Some(pair_interrupt), true)?;
+        }
+        Ok(Self)
+    }
+    pub(crate) fn interrupted(&self) -> bool {
+        PAIR_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+impl Drop for PairInterrupt {
+    fn drop(&mut self) {
+        unsafe {
+            let _ =
+                windows::Win32::System::Console::SetConsoleCtrlHandler(Some(pair_interrupt), false);
+        }
+    }
+}

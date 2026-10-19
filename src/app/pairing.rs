@@ -119,7 +119,7 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                     state.lock().unwrap().socket = Some(ch.socket.try_clone()?);
                 }
                 ch.send(own.port())?;
-                let port = ch.receive()?;
+                let port = ch.receive(|| alive(&state.lock().unwrap()))?;
                 ensure!(port > 0, "invalid advertised port");
                 let peer = SocketAddr::new(ip, port);
                 if let Some(expected) = remote {
@@ -142,7 +142,10 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                     std::thread::sleep(Duration::from_millis(100));
                 }
                 ch.send(1)?;
-                ensure!(ch.receive()? == 1, "peer declined pairing");
+                ensure!(
+                    ch.receive(|| alive(&state.lock().unwrap()))? == 1,
+                    "peer declined pairing"
+                );
                 ensure!(
                     alive(&state.lock().unwrap()),
                     "pairing cancelled or expired"
@@ -157,7 +160,10 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                 )?;
                 // Both persist before reporting completion. Disconnect may leave one side saved; retry is idempotent.
                 ch.send(2)?;
-                ensure!(ch.receive()? == 2, "peer declined pairing");
+                ensure!(
+                    ch.receive(|| alive(&state.lock().unwrap()))? == 2,
+                    "peer declined pairing"
+                );
                 Ok(())
             };
             let result = run();

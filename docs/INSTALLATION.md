@@ -15,37 +15,48 @@ Scope: paired Windows/macOS machines on a trusted local network. User-session Ag
 
 Files always copy; Rustboard never moves, recycles or deletes an original. Cut metadata and sensitive-content markers do not add synchronization policy. Supported text, file and image-file capture retains its normal size and format validation.
 
-## Install (current user, login startup)
+## Install (current user)
 
-Extract the package into a new directory. Keep its `bin`, `scripts` and app layout. Use a LAN IP actually assigned to the machine; reserve addresses in DHCP for stable pairing. No firewall/security settings are changed by installation.
+Installation only deploys files and CLI/PATH entries. It does not create config or
+identity, register File Provider, start the Agent, enable login startup or wait for
+system approval. Stop an existing service before replacing installed files; the
+installer does not stop or restart it for you. Existing user data is retained.
 
-Windows, PowerShell (replace the IP):
+Windows:
 
 ```powershell
-./platforms/windows/scripts/install.ps1 -Listen 192.168.100.6:45451
-& "$env:LOCALAPPDATA/Rustboard/bin/rustboard.exe" status
+./platforms/windows/scripts/install.ps1
 ```
 
-Installs in `%LOCALAPPDATA%/Rustboard/bin`; current-user Run entry `Rustboard`. Agent runs hidden in the logged-in user's session, not Session 0. `platforms/windows/scripts/uninstall.ps1` removes startup and binaries but preserves settings/identity.
+Files are installed in `%LOCALAPPDATA%/Rustboard/bin`.
 
-macOS, from the extracted signed package (replace the IP):
+macOS, from the extracted package:
 
 ```sh
-bash platforms/macos/scripts/install.sh --listen 192.168.100.4:45452
-"$HOME/Library/Application Support/Rustboard/bin/rustboard" status
+bash platforms/macos/scripts/install.sh
 ```
 
-Installs `~/Applications/Rustboard.app`, binaries in `~/Library/Application Support/Rustboard/bin`, and user LaunchAgent `org.rustboard.agent`. Requires the same real Apple signing team for Agent/CLI/host/extension. The developer's private key is used only by its owner running `platforms/macos/scripts/sign.sh`; build/package/install never sign. Signing does not imply notarization. System permission prompts must be handled locally. `bash platforms/macos/scripts/uninstall.sh` preserves identity/settings.
+Files are installed in `~/Applications/Rustboard.app` and
+`~/Library/Application Support/Rustboard/bin`.
 
-Do not assume a successful SSH foreground test proves launchd network/File Provider permission behavior. Installed-background copy must be tested separately. `status` currently confirms reachable Agent/config identity, not complete Finder health.
+In a new terminal, explicitly initialize and enable the service:
 
-## macOS file permissions
+```sh
+rustboard start
+rustboard config
+```
 
-The installed Agent is a standalone, non-sandboxed executable; the host and File Provider remain sandboxed. File access privacy permissions belong to the installed Agent, not automatically to the visible Rustboard.app. User-approved Files and Folders prompts occurred during acceptance; successful copy did not mean a prompt-free deployment.
+First start creates the default config and device identity using DPAPI/Keychain.
+On Mac it also registers File Provider and creates/loads the launchd service;
+on Windows it registers login startup and starts the user-session Agent.
+Later starts reuse existing identity, pairing and configuration. Configure a local
+listen address, save, then run `rustboard restart` before pairing. The default
+null listen address keeps networking off until configured.
 
-For broad file-copy use, the user can grant Full Disk Access in System Settings > Privacy & Security > Full Disk Access. Use + and the file chooser's Cmd+Shift+G to select `~/Library/Application Support/Rustboard/bin/rustboardd`, then enable it. This grants broad read access, including protected app data; it does not make the Agent root or remove File Provider sandbox restrictions. Restart the managed Agent after changing the setting. Do not grant the old scratch-build executable or SSH/Terminal merely to make Rustboard work.
-
-Rustboard cannot silently grant this permission; no installer or script modifies TCC. The user has enabled Full Disk Access; comprehensive cross-folder prompt-free acceptance has not been performed. Pasteboard, network and File Provider permissions remain separate; report the actual prompt if those still appear.
+Any system permission or execution approval belongs to running the program, not
+installation. Installers do not test first launch or handle Open Anyway.
+Uninstall removes application files and startup registration but retains identity,
+configuration and pairing.
 
 ## Pair both ends
 
@@ -79,7 +90,7 @@ Runtime fields in `config.json` (the full generated schema-2 file also contains 
 {"listen":"192.168.100.6:45451","mode":"all"}
 ```
 
-Use the machine's own address/port. CLI `--listen` on the Agent overrides the file for that run. Updating listen requires restarting the Agent; rerunning the installer updates installation and startup. A null listen address disables the listener; an unavailable configured address fails startup rather than silently listening on every interface.
+Use the machine's own address/port. CLI `--listen` on the Agent overrides the file for that run. Updating listen requires restarting the Agent; installation does not change the configuration or startup setting. A null listen address disables the listener; an unavailable configured address fails startup rather than silently listening on every interface.
 
 Configuration edits, pairing and unpairing are saved for the next startup, without live reload. `status` reports pending changes. Run `rustboard restart` after editing. Package restart scripts are wrappers for that command. To immediately revoke access, use `stop` (also disables login startup); a later `start` loads the saved config.
 
@@ -157,8 +168,8 @@ bucket/package. `scoop install rustboard` also works when the name is unambiguou
 Homebrew and Scoop must already be installed. Homebrew owns the CLI link in its
 prefix/bin; Scoop owns its shim. Vendor scripts run with PATH modification disabled
 under these managers. Direct script installation still manages its own user PATH.
-Uninstall preserves identity, pairing and configuration. Service enablement survives
-updates. Scoop is per-user only; global installation is rejected.
+Uninstall preserves identity, pairing and configuration. Installers leave startup registration unchanged; stop before updating and explicitly
+start afterwards. Scoop is per-user only; global installation is rejected.
 
 Windows archives can also be built with
 `./platforms/windows/scripts/package.ps1 -OutputRoot target/distribution`.

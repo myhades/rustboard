@@ -120,7 +120,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
             let p = config_path()?;
             ensure!(
                 p.is_file(),
-                "configuration not found: {}; install Rustboard for this user first",
+                "configuration not found: {}; run 'rustboard start' first",
                 p.display()
             );
             service::edit(&p)?;
@@ -218,6 +218,10 @@ fn print_peers(peers: &Value) {
     }
 }
 fn pair(target: Option<&str>) -> Result<()> {
+    ensure!(
+        request(&["status"]).is_ok(),
+        "Service is not running. Run 'rustboard start' first."
+    );
     let target = target.map(address).transpose()?.map(|a| a.to_string());
     let v = if let Some(a) = &target {
         request(&["pair-begin", a])?

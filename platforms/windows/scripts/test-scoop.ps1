@@ -20,6 +20,15 @@ try {
     & $scoop bucket add rustboard ([Uri]::new($bucket).AbsoluteUri)
     & $scoop install rustboard/rustboard
     $cli=Join-Path $env:SCOOP 'shims/rustboard.exe'
+    $config=Join-Path $env:LOCALAPPDATA 'Rustboard/default/config.json'
+    if (Test-Path $config) {throw 'Installation initialized config'}
+    if (Get-Process rustboardd -ErrorAction SilentlyContinue) {throw 'Installation started Agent'}
+    if (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Rustboard -ErrorAction SilentlyContinue) {throw 'Installation enabled startup'}
+    $pairOutput=& $cli pair 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0 -or $pairOutput -notmatch "Run 'rustboard start' first") {throw 'Pair did not require explicit start'}
+    if (Test-Path $config) {throw 'Pair initialized config'}
+    & $cli start
+    if ($LASTEXITCODE) {throw 'First start failed'}
     & $cli status --json
     if ($LASTEXITCODE) {throw 'Installed CLI/service not ready'}
     $config=Join-Path $env:LOCALAPPDATA 'Rustboard/default/config.json'

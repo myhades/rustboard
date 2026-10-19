@@ -42,7 +42,43 @@ pub fn enabled() -> Result<bool> {
 }
 pub fn start(register: bool) -> Result<()> {
     let p = plist()?;
-    ensure!(p.exists(), "Rustboard is not installed");
+    let home = PathBuf::from(std::env::var("HOME")?);
+    let base = home.join("Library/Application Support/Rustboard");
+    let app = home.join("Applications/Rustboard.app");
+    ensure!(
+        base.join("bin/rustboardd").is_file() && app.join("Contents/MacOS/Rustboard").is_file(),
+        "Rustboard is not installed"
+    );
+    if crate::app::cli::request(&["status"]).is_err() {
+        ensure!(
+            Command::new("/usr/bin/pluginkit")
+                .arg("-a")
+                .arg(app.join("Contents/PlugIns/RustboardProvider.appex"))
+                .status()?
+                .success(),
+            "File Provider registration failed"
+        );
+        ensure!(
+            Command::new(app.join("Contents/MacOS/Rustboard"))
+                .arg("register")
+                .status()?
+                .success(),
+            "File Provider initialization failed"
+        );
+        ensure!(
+            Command::new("python3")
+                .args([
+                    "-c",
+                    include_str!("../../../platforms/macos/scripts/launchd.py")
+                ])
+                .arg(&base)
+                .arg(&app)
+                .arg(&p)
+                .status()?
+                .success(),
+            "cannot create login service"
+        );
+    }
     if register {
         launch(&["enable", &label()])?;
     }

@@ -150,6 +150,7 @@ pub fn run() -> Result<()> {
         rb_init();
     }
     let dir = ipc::data_dir()?;
+    ipc::protect_dir(&dir)?;
     let server = ipc::Server::bind(dir.clone())?;
     let images = dir.join("images");
     ipc::protect_dir(&images)?;

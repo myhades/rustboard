@@ -22,11 +22,8 @@ cask "rustboard" do
   }
   caveats <<~EOS
     Development-signed and NOT notarized. Other-Mac File Provider acceptance is pending.
-    macOS may require manual Open Anyway approval.
-    Configure listen and pairing after installation: rustboard config
-    Apply saved changes: rustboard restart
-    Permissions: see docs/INSTALLATION.md for manual System Settings instructions.
-    Full Disk Access is only needed for protected source locations.
+    Initialize and enable the service: rustboard start
+    Then configure with rustboard config and rustboard pair.
     Uninstall retains identity, peers and configuration.
   EOS
 end

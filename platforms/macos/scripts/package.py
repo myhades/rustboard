@@ -21,7 +21,7 @@ def executable_scripts(info):
     return info
 with tarfile.open(archive,'w:gz') as tar:
     for name in ['bin','Rustboard.app']:tar.add(out/name,arcname=name)
-    for name in ['install.sh','uninstall.sh','launchd.py','restart.sh','path.py']:tar.add(root/'platforms/macos/scripts'/name,arcname='platforms/macos/scripts/'+name,filter=executable_scripts)
+    for name in ['install.sh','uninstall.sh','restart.sh','path.py']:tar.add(root/'platforms/macos/scripts'/name,arcname='platforms/macos/scripts/'+name,filter=executable_scripts)
     tar.add(root/'LICENSE',arcname='LICENSE')
     for name in ['INSTALLATION.md','STATUS.md','SECURITY.md']:tar.add(root/'docs'/name,arcname='docs/'+name)
 hasher=hashlib.sha256()

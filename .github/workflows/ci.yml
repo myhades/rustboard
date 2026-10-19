@@ -23,7 +23,7 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: python scripts/check-vectors.py
       - if: runner.os == 'macOS'
-        run: bash platforms/macos/scripts/test.sh && bash platforms/macos/scripts/build.sh
+        run: bash platforms/macos/scripts/test.sh && bash platforms/macos/scripts/build.sh && bash platforms/macos/scripts/test-install.sh
       - if: runner.os != 'macOS'
         run: cargo build --release --locked
       - if: runner.os == 'Windows'

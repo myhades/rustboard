@@ -55,7 +55,6 @@ pub fn data_dir() -> Result<PathBuf> {
         libc::free(raw.cast());
     }
     let dir = PathBuf::from(path).join(profile()?);
-    protect_dir(&dir)?;
     Ok(dir)
 }
 fn authenticate(stream: &UnixStream, server: bool) -> Result<()> {

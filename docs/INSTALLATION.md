@@ -61,7 +61,7 @@ configuration and pairing.
 
 Use `rustboard` in a new terminal after installation, or use the installed CLI path shown above.
 
-On the receiving machine run `rustboard pair`. It displays its certificate fingerprint and waits for up to 120 seconds. On the other machine run `rustboard pair <IP>[:port]` (default port 45452). Both terminals show the other device's certificate fingerprint. Compare each against the fingerprint displayed locally on the other machine, and type `y` on BOTH sides. Default/EOF declines. On success, restart both services with `rustboard restart`.
+On the receiving machine run `rustboard pair`. It displays its certificate fingerprint and waits for up to 120 seconds. On the other machine run `rustboard pair <IP>[:port]` (default port 45452). Both terminals show the other device's certificate fingerprint. Compare each against the fingerprint displayed locally on the other machine, and confirm on BOTH sides. Enter accepts the default Yes; `n` or EOF declines. After both sides save the pairing, each CLI restarts its local service automatically.
 
 The pairing-only TLS endpoint temporarily uses the configured listening port plus one (e.g. sync 45452, enrollment 45453). That port must be reachable; Rustboard does not alter firewalls. It accepts only identity/confirmation records, never clipboard/file requests. Closing the CLI normally cancels immediately; forced terminal loss closes the window within ten seconds. The total session expires after 120 seconds. TLS proves possession of each displayed certificate's private key; human fingerprint comparison authorizes the identity. No discovery or automatic trust-on-first-use is added.
 

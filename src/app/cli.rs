@@ -3,7 +3,7 @@
 use crate::platform::macos::{ipc, service};
 #[cfg(windows)]
 use crate::platform::windows::{ipc, service};
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use std::{
     io::{self, Write},
@@ -176,7 +176,7 @@ Run 'rustboard help COMMAND' for command details."
             "config\n\nOpen the existing configuration using VISUAL, then EDITOR, or the system\ntext editor. VISUAL and EDITOR must name an executable.\nSave your changes, then run 'rustboard restart' to apply them."
         }
         "pair" => {
-            "pair [IP[:PORT]]\n\nWithout an address, wait for an incoming pairing request. With an address,\nconnect to that device; the default port is 45452. Use [IPv6]:PORT for IPv6\nwith an explicit port. Compare fingerprints on both devices before accepting.\nBoth services must be running. Restart both services after pairing succeeds."
+            "pair [IP[:PORT]]\n\nWithout an address, wait for an incoming pairing request. With an address,\nconnect to that device; the default port is 45452. Use [IPv6]:PORT for IPv6\nwith an explicit port. Compare fingerprints on both devices before accepting.\nBoth services must be running. Each service restarts after pairing succeeds."
         }
         "unpair" => {
             "unpair IP\n\nRemove all saved pairings at the specified IPv4 or IPv6 address. Do not\ninclude a port. Restart the service to revoke existing trust.\nTo revoke access immediately, stop the service before removing the pairing."
@@ -247,19 +247,23 @@ fn pair(target: Option<&str>) -> Result<()> {
                     v["peer"].as_str().unwrap_or("?"),
                     group(v["fingerprint"].as_str().unwrap_or(""))
                 );
-                print!("Compare fingerprints on BOTH devices. Accept? [y/N] ");
+                print!("Compare fingerprints on BOTH devices. Accept? [Y/n] ");
                 io::stdout().flush()?;
                 let tx = tx.clone();
                 std::thread::spawn(move || {
-                    let mut line = String::new();
-                    let ok = io::stdin().read_line(&mut line).is_ok()
-                        && matches!(line.trim(), "y" | "Y" | "yes");
+                    let ok = accept_pairing(&mut io::stdin().lock());
                     let _ = tx.send(ok);
                 });
                 prompted = true;
             }
             "saved" => {
-                println!("Pairing saved on both devices. Restart both services to apply.");
+                println!("Peer added. Restarting service...");
+                drop(_guard);
+                service::stop(false)
+                    .and_then(|_| service::start(false))
+                    .context(
+                        "Peer was saved, but service restart failed; run 'rustboard restart'",
+                    )?;
                 return Ok(());
             }
             "failed" => anyhow::bail!("{}", v["error"].as_str().unwrap_or("pairing failed")),
@@ -268,8 +272,31 @@ fn pair(target: Option<&str>) -> Result<()> {
         if let Ok(ok) = rx.try_recv() {
             ensure!(ok, "pairing declined");
             request(&["pair-approve", &id])?;
-            println!("Waiting for peer confirmation and save...");
+            println!("Waiting for peer...");
         }
         std::thread::sleep(Duration::from_millis(300));
+    }
+}
+
+fn accept_pairing(reader: &mut impl io::BufRead) -> bool {
+    let mut line = String::new();
+    if !matches!(reader.read_line(&mut line), Ok(n) if n > 0) {
+        return false;
+    }
+    let answer = line.trim();
+    answer.is_empty() || answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::accept_pairing;
+    #[test]
+    fn pairing_defaults_to_yes_but_eof_and_declines_are_not_approval() {
+        for input in ["\n", "\r\n", "y\n", "YES\n"] {
+            assert!(accept_pairing(&mut input.as_bytes()));
+        }
+        for input in ["", "n\n", "no\n", "invalid\n"] {
+            assert!(!accept_pairing(&mut input.as_bytes()));
+        }
     }
 }

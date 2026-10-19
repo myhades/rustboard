@@ -167,8 +167,27 @@ impl ClientCertVerifier for Pins {
 
 pub type Client = StreamOwned<ClientConnection, TcpStream>;
 pub(super) const ALPN_V2: &[u8] = b"rustboard/2";
+pub(super) fn crypto_provider() -> rustls::crypto::CryptoProvider {
+    let mut provider = rustls::crypto::ring::default_provider();
+    let prefer_chacha = {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            !(std::is_x86_feature_detected!("aes") && std::is_x86_feature_detected!("pclmulqdq"))
+        }
+        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+        {
+            false
+        }
+    };
+    if prefer_chacha {
+        provider
+            .cipher_suites
+            .sort_by_key(|suite| suite.suite() != CipherSuite::TLS13_CHACHA20_POLY1305_SHA256);
+    }
+    provider
+}
 pub fn connect(identity: &Identity, peer: &Peer) -> Result<Client> {
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let provider = Arc::new(crypto_provider());
     let mut config = ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&version::TLS13])?
         .dangerous()

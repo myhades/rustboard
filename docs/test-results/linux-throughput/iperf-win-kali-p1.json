@@ -1,0 +1,79 @@
+{
+  "start": {
+    "connected": [
+      {
+        "socket": 4,
+        "local_host": "192.168.100.6",
+        "local_port": 13771,
+        "remote_host": "192.168.100.156",
+        "remote_port": 48930
+      }
+    ],
+    "version": "iperf 3.1.3",
+    "system_info": "CYGWIN_NT-10.0 dev-rog 2.5.1(0.297/5/3) 2016-04-21 22:14 x86_64",
+    "timestamp": {
+      "time": "Mon, 19 Oct 2026 18:23:41 GMT",
+      "timesecs": 1792434221
+    },
+    "connecting_to": {
+      "host": "192.168.100.156",
+      "port": 48930
+    },
+    "cookie": "dev-rog.1792434221.145096.1b34d2b96a",
+    "tcp_mss_default": 0,
+    "test_start": {
+      "protocol": "TCP",
+      "num_streams": 1,
+      "blksize": 131072,
+      "omit": 2,
+      "duration": 12,
+      "bytes": 0,
+      "blocks": 0,
+      "reverse": 0
+    }
+  },
+  "end": {
+    "streams": [
+      {
+        "sender": {
+          "socket": 4,
+          "start": 0,
+          "end": 12.000493,
+          "seconds": 12.000493,
+          "bytes": 1418330112,
+          "bits_per_second": 945514577.985281
+        },
+        "receiver": {
+          "socket": 4,
+          "start": 0,
+          "end": 12.000493,
+          "seconds": 12.000493,
+          "bytes": 1419509760,
+          "bits_per_second": 946300977.689732
+        }
+      }
+    ],
+    "sum_sent": {
+      "start": 0,
+      "end": 12.000493,
+      "seconds": 12.000493,
+      "bytes": 1418330112,
+      "bits_per_second": 945514577.985281
+    },
+    "sum_received": {
+      "start": 0,
+      "end": 12.000493,
+      "seconds": 12.000493,
+      "bytes": 1419509760,
+      "bits_per_second": 946300977.689732
+    },
+    "cpu_utilization_percent": {
+      "host_total": 6.110793,
+      "host_user": 0.55488,
+      "host_system": 5.555913,
+      "remote_total": 4.718685,
+      "remote_user": 0.514833,
+      "remote_system": 4.203837
+    }
+  }
+}

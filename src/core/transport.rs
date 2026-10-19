@@ -149,18 +149,21 @@ impl Node {
             .iter()
             .map(|p| p.fingerprint.clone())
             .collect();
-        let mut config =
-            ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-                .with_protocol_versions(&[&version::TLS13])?
-                .with_client_cert_verifier(Arc::new(Pins {
-                    pins,
-                    pairing: false,
-                }))
-                .with_single_cert(
-                    vec![CertificateDer::from(self.identity.cert.clone())],
-                    self.identity.key(),
-                )?;
+        let provider = tls::crypto_provider();
+        let prefer_server =
+            provider.cipher_suites[0].suite() == CipherSuite::TLS13_CHACHA20_POLY1305_SHA256;
+        let mut config = ServerConfig::builder_with_provider(Arc::new(provider))
+            .with_protocol_versions(&[&version::TLS13])?
+            .with_client_cert_verifier(Arc::new(Pins {
+                pins,
+                pairing: false,
+            }))
+            .with_single_cert(
+                vec![CertificateDer::from(self.identity.cert.clone())],
+                self.identity.key(),
+            )?;
         config.alpn_protocols = vec![ALPN_V2.to_vec()];
+        config.ignore_client_order = prefer_server;
         let mut stream = StreamOwned::new(ServerConnection::new(Arc::new(config))?, socket);
         while stream.conn.is_handshaking() {
             stream.conn.complete_io(&mut stream.sock)?;
@@ -177,6 +180,7 @@ impl Node {
         // A connection reads one file at a time. Keep its platform lock across
         // chunks; EOF, cancellation, failure or idle disconnect releases it.
         let mut transfer = None;
+        let mut read_buffer = Vec::new();
         while !self.stop.load(Ordering::Acquire) {
             let message: Message = read_frame(&mut stream)?;
             ensure!(self.trusted(&pin), "peer revoked");
@@ -260,81 +264,68 @@ impl Node {
                                 && length as usize <= READ_WINDOW
                                 && offset <= source.len() =>
                         {
-                            let mut bytes = vec![0; length as usize];
-                            let read = (|| -> Result<usize> {
-                                let key = (
-                                    source_device.clone(),
-                                    offer_id.clone(),
-                                    file_id.clone(),
-                                    version.clone(),
-                                    background,
-                                );
-                                if transfer.as_ref().is_none_or(|(active, _)| active != &key) {
-                                    transfer = None;
-                                    transfer = Some((
-                                        key,
-                                        if background {
-                                            None
-                                        } else {
-                                            source.transfer_guard()?
-                                        },
-                                    ));
-                                }
-                                if background && source.is_empty() {
-                                    source.read_background(0, &mut [])?;
-                                }
-                                let mut total = 0;
-                                while total < bytes.len() && offset + (total as u64) < source.len()
-                                {
-                                    ensure!(
-                                        self.trusted(&pin) && !self.stop.load(Ordering::Acquire),
-                                        "revoked"
-                                    );
-                                    // Revalidate authority and source version between bounded reads.
-                                    self.engine.lock().unwrap().source(
-                                        &source_device,
-                                        &offer_id,
-                                        &file_id,
-                                        &version,
-                                    )?;
-                                    let end = (total + MAX_CHUNK).min(bytes.len());
-                                    let n = if background {
-                                        source.read_background(
-                                            offset + total as u64,
-                                            &mut bytes[total..end],
-                                        )?
+                            let key = (
+                                source_device.clone(),
+                                offer_id.clone(),
+                                file_id.clone(),
+                                version.clone(),
+                                background,
+                            );
+                            if transfer.as_ref().is_none_or(|(active, _)| active != &key) {
+                                drop(transfer.take());
+                                transfer = Some((
+                                    key,
+                                    if background {
+                                        None
                                     } else {
-                                        source.read_at(
-                                            offset + total as u64,
-                                            &mut bytes[total..end],
-                                        )?
-                                    };
-                                    ensure!(n > 0, "unexpected EOF");
-                                    total += n;
-                                }
-                                Ok(total)
-                            })();
-                            match read {
-                                Ok(n) => {
-                                    bytes.truncate(n);
-                                    if offset + n as u64 >= source.len() {
-                                        transfer = None;
-                                    }
-                                    Message::Data {
-                                        request_id,
-                                        offset,
-                                        eof: offset + n as u64 >= source.len(),
-                                        bytes,
-                                    }
-                                }
-                                Err(_) => {
-                                    transfer = None;
-                                    Message::Error {
-                                        request_id: Some(request_id),
-                                        code: ErrorCode::VersionChanged,
-                                    }
-                                }
+                                        source.transfer_guard()?
+                                    },
+                                ));
                             }
+                            if background && source.is_empty() {
+                                source.read_background(0, &mut [])?;
+                            }
+                            let length = (length as u64).min(source.len() - offset) as usize;
+                            let eof = offset + length as u64 == source.len();
+                            read_buffer.resize(MAX_CHUNK, 0);
+                            framing::write_binary_header(
+                                &mut stream,
+                                request_id,
+                                offset,
+                                eof,
+                                length,
+                            )?;
+                            let mut total = 0;
+                            while total < length {
+                                ensure!(
+                                    self.trusted(&pin) && !self.stop.load(Ordering::Acquire),
+                                    "revoked"
+                                );
+                                self.engine.lock().unwrap().source(
+                                    &source_device,
+                                    &offer_id,
+                                    &file_id,
+                                    &version,
+                                )?;
+                                let limit = (length - total).min(MAX_CHUNK);
+                                let n = if background {
+                                    source.read_background(
+                                        offset + total as u64,
+                                        &mut read_buffer[..limit],
+                                    )?
+                                } else {
+                                    source
+                                        .read_at(offset + total as u64, &mut read_buffer[..limit])?
+                                };
+                                ensure!(n > 0 && n <= limit, "unexpected read length");
+                                stream.write_all(&read_buffer[..n])?;
+                                total += n;
+                            }
+                            stream.flush()?;
+                            if eof {
+                                transfer = None;
+                            }
+                            continue;
                         }
                         _ => Message::Error {
                             request_id: Some(request_id),

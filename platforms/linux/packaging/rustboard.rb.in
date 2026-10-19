@@ -1,0 +1,29 @@
+cask "rustboard" do
+  version "@VERSION@"
+  sha256 "@SHA256@"
+  url "@URL@"
+  name "Rustboard"
+  desc "Native clipboard sync with lazy file transfer"
+  homepage "https://github.com/myhades/rustboard"
+  depends_on :linux
+  depends_on arch: :intel
+
+  installer script: {
+    executable: "/bin/sh",
+    args: ["#{staged_path}/platforms/linux/scripts/install.sh", "#{staged_path}/bin", "--no-path"],
+    sudo: false,
+  }
+  binary "#{Dir.home}/.local/lib/rustboard/rustboard"
+  uninstall script: {
+    executable: "/bin/sh",
+    args: ["#{staged_path}/platforms/linux/scripts/uninstall.sh"],
+    sudo: false,
+  }
+  caveats <<~EOS
+    Requires x86_64 Linux with glibc 2.39+, systemd, FUSE 3, libsecret and libdbus.
+    Run in a desktop session with an unlocked Secret Service keyring.
+    Initialize and enable the service: rustboard start
+    Stop Rustboard before upgrading; run rustboard start when ready afterwards.
+    Uninstall retains identity, peers and configuration.
+  EOS
+end

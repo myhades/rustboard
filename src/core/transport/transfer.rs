@@ -146,7 +146,7 @@ impl ReadAt for RemoteSource {
             } else {
                 buffer.len()
             };
-            connection.bytes.clear();
+            let bytes = std::mem::take(&mut connection.bytes);
             connection.last_request = Some(Instant::now());
             let stream = connection.stream.as_mut().unwrap();
             write_frame(
@@ -162,7 +162,7 @@ impl ReadAt for RemoteSource {
                     length: length as u32,
                 },
             )?;
-            let reply = read_v2_data(stream, length)?;
+            let reply = read_v2_data(stream, length, bytes)?;
             match reply {
                 DataReply {
                     request_id: 1,
@@ -182,7 +182,10 @@ impl ReadAt for RemoteSource {
                     let n = bytes.len().min(buffer.len());
                     buffer[..n].copy_from_slice(&bytes[..n]);
                     connection.offset = offset;
-                    connection.bytes = if bytes.len() > n { bytes } else { Vec::new() };
+                    connection.bytes = bytes;
+                    if connection.bytes.len() <= n {
+                        connection.bytes.clear();
+                    }
                     connection.next = Some(offset + n as u64);
                     Ok(n)
                 }

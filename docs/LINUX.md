@@ -9,6 +9,42 @@ D-Bus clipboard session when data-control is absent, without starting screen sha
 creating input devices. No GNOME Shell extension or XWayland is required. If neither interface
 is available, startup reports an error. The older `wlr-data-control` protocol is not used.
 
+## Homebrew
+
+The next release adds Linux x86_64 to the existing tap. Version 0.1.0 has no Linux
+release archive. After that release's package manifest is merged:
+
+```sh
+brew tap myhades/rustboard https://github.com/myhades/rustboard
+brew install --cask myhades/rustboard/rustboard
+rustboard start
+```
+
+Use current Homebrew with Linux Cask support. The binary requires glibc 2.39 or newer,
+systemd user services and a supported desktop session. Install the distribution's
+FUSE 3, libsecret, libdbus and Secret Service provider; the Cask does not modify the
+system package manager. On Ubuntu/Debian/Kali:
+
+```sh
+sudo apt install fuse3 libsecret-1-0 libdbus-1-3 gnome-keyring
+```
+
+Homebrew links the CLI into its own `bin` directory. It does not add another PATH
+entry or create a second link in `~/.local/bin`. The binaries are installed in
+`~/.local/lib/rustboard`. Installation creates no profile, identity or service.
+
+```sh
+rustboard stop
+brew upgrade --cask myhades/rustboard/rustboard
+rustboard start
+```
+
+Updates retain configuration and keyring identity. They do not start the service.
+To uninstall, run `brew uninstall --cask myhades/rustboard/rustboard`; this stops and
+unregisters the service, removes the binaries and Brew CLI link, and retains user data.
+
+## Manual installation
+
 Runtime packages on Debian/Ubuntu: `fuse3`, `libsecret-1-0`, `libdbus-1-3`, and a Secret Service
 provider such as GNOME Keyring. Build with the Rust toolchain, a C compiler, `pkg-config`
 and `libdbus-1-dev`:

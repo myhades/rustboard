@@ -38,7 +38,8 @@ there is no notarization request. An expired/revoked certificate fails the job.
 2. Push the tested commit and create its `v<exact Cargo version>` tag. Explicitly
    publish a new GitHub Release for that tag to start release builds. Pushing a
    tag alone does not start release builds.
-3. Release builds test and package Windows x64, macOS arm64 and x86_64. Windows
+3. Release builds test and package Windows x64, macOS arm64 and x86_64, and Linux
+   x86_64 on Ubuntu 24.04. Windows
    uses Scoop with the existing vendor scripts; a disposable runner tests actual
    bucket install, disabled-service update, identity preservation and uninstall.
 4. Only after all builds pass, upload archives, SHA-256 sidecars and generated
@@ -70,3 +71,29 @@ Scoop owns its shim; the vendor install runs with -NoPath. Updates preserve the
 Agent's enabled/disabled state. Only an actual uninstall removes installed
 binaries/startup, and identity/config remain in LocalAppData. No duplicate user
 PATH entry is added by the vendor script.
+
+## Linux package
+
+The Linux release job builds the two binaries, packages the vendor scripts, and
+writes a SHA-256 sidecar. `release-manifests.py` produces a single cross-platform
+Cask: macOS keeps its signed archives and Linux selects the x86_64 tarball. The tap
+and Scoop bucket remain in this repository; no extra token or package repository
+is required. The published 0.1.0 Cask remains unchanged until a new release supplies
+Linux assets. See [Linux installation](LINUX.md) for dependencies and commands.
+
+Linux CI runs `platforms/linux/scripts/test-brew.py` against local release artifacts
+and a temporary Cask with local test revision numbers. It checks fresh installation,
+actual `brew upgrade`, file replacement, preserved configuration, absence of startup
+registration, and uninstall/CLI-link cleanup. These revisions are never published.
+The test requires a Brew installation without Rustboard already installed.
+
+For local checks after `cargo build --release --locked --bins`:
+
+```sh
+python3 platforms/linux/scripts/package.py
+python3 scripts/release-manifests.py --linux-only --tag v0.1.0 --assets target/release-assets --output target/manifests
+python3 platforms/linux/scripts/test-brew.py
+```
+
+Use the current Cargo version for `--tag`. Package tests do not require a desktop or
+unlocked keyring; first-start desktop acceptance is separate from installation.

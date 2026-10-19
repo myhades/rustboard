@@ -1,5 +1,5 @@
-//! Explicit two-machine diagnostic. Never captures the clipboard; only generated data.
-//! init DIR; serve DIR ADDRESS PEER_PIN SIZE; receive DIR ADDRESS PEER_PIN [core|ipc]
+//! Explicit two-machine diagnostic. Never captures the clipboard; uses a generated pattern or supplied file.
+//! init DIR; serve DIR ADDRESS PEER_PIN SIZE [SOURCE_FILE]; receive DIR ADDRESS PEER_PIN [core|ipc|com OUTPUT]
 #[path = "../../../tests/support/pattern.rs"]
 mod pattern;
 #[path = "../../../tests/support/identity.rs"]
@@ -43,6 +43,13 @@ fn main() -> Result<()> {
         let size: u64 = args.get(5).context("size required")?.parse()?;
         ensure!(size > 0 && size <= 1073741824, "size out of bounds");
         let source = Arc::new(PatternSource::new(size));
+        let reader: Arc<dyn ReadAt> = if let Some(path) = args.get(6) {
+            let file = LocalFile::open(Path::new(path))?;
+            ensure!(file.len() == size, "source file size mismatch");
+            Arc::new(file)
+        } else {
+            source.clone()
+        };
         let id = new_id();
         let file = FileEntry {
             file_id: id.clone(),
@@ -53,13 +60,13 @@ fn main() -> Result<()> {
         };
         node.engine.lock().unwrap().local(
             Content::Files { files: vec![file] },
-            HashMap::from([(id, source.clone() as Arc<dyn ReadAt>)]),
+            HashMap::from([(id, reader)]),
         )?;
         let listener = TcpListener::bind(peer.address)?;
         let server = node.serve(listener)?;
         println!(
             "{}",
-            serde_json::json!({"ready":true,"pin":node.identity.pin(),"source_bytes":source.bytes_read.load(Ordering::Relaxed)})
+            serde_json::json!({"ready":true,"pin":node.identity.pin(),"source_bytes":args.get(6).is_none().then(|| source.bytes_read.load(Ordering::Relaxed))})
         );
         // A marker allows deterministic cleanup without killing an unrelated process.
         let stop = dir.join("stop");
@@ -73,11 +80,15 @@ fn main() -> Result<()> {
         server.join().unwrap();
         println!(
             "{}",
-            serde_json::json!({"source_bytes":source.bytes_read.load(Ordering::Relaxed)})
+            serde_json::json!({"source_bytes":args.get(6).is_none().then(|| source.bytes_read.load(Ordering::Relaxed))})
         );
         return Ok(());
     }
     ensure!(mode == "receive", "unknown mode");
+    let cipher = connect(&node.identity, &peer)?
+        .conn
+        .negotiated_cipher_suite()
+        .map(|s| format!("{:?}", s.suite()));
     node.sync_once(&peer)?;
     let offer = node
         .engine
@@ -95,7 +106,15 @@ fn main() -> Result<()> {
         .context("empty offer")?
         .clone();
     let remote = RemoteSource::new(node.clone(), peer, offer.clone(), file.clone());
+    #[cfg(windows)]
+    if args.get(5).is_some_and(|s| s == "com") {
+        return receive_com(
+            remote,
+            Path::new(args.get(6).context("output file required")?),
+        );
+    }
     let ipc = args.get(5).is_some_and(|s| s == "ipc");
+    let expected: Vec<u8> = (0..MAX_CHUNK + 250).map(|i| (i % 251) as u8).collect();
     let mut latencies = Vec::new();
     let mut buffer = vec![0; MAX_CHUNK];
     let mut offset = 0;
@@ -142,9 +161,7 @@ fn main() -> Result<()> {
             ensure!(
                 n == length
                     && buffer[..n]
-                        .iter()
-                        .enumerate()
-                        .all(|(i, b)| *b == ((offset + i as u64) % 251) as u8),
+                        == expected[(offset % 251) as usize..(offset % 251) as usize + n],
                 "corrupt data"
             );
         }
@@ -161,7 +178,77 @@ fn main() -> Result<()> {
     };
     println!(
         "{}",
-        serde_json::json!({"mode":if ipc {"typed_ipc_encode"} else {"core_tls"},"bytes":offset,"seconds":seconds,"read_seconds":read_seconds,"encode_seconds":encode_seconds,"encoded_bytes":encoded_bytes,"mib_s":offset as f64/1048576.0/seconds,"read_ms_p50":percentile(0.5),"read_ms_p95":percentile(0.95),"read_ms_p99":percentile(0.99),"validated":true})
+        serde_json::json!({"cipher":cipher,"mode":if ipc {"typed_ipc_encode"} else {"core_tls"},"bytes":offset,"seconds":seconds,"read_seconds":read_seconds,"encode_seconds":encode_seconds,"encoded_bytes":encoded_bytes,"mib_s":offset as f64/1048576.0/seconds,"read_ms_p50":percentile(0.5),"read_ms_p95":percentile(0.95),"read_ms_p99":percentile(0.99),"validated":true})
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
+fn receive_com(remote: RemoteSource, output: &Path) -> Result<()> {
+    use rustboard::platform::{
+        PresentedFile,
+        windows::virtual_files::{create, format},
+    };
+    use std::io::Write;
+    use windows::{
+        Win32::System::{Com::*, DataExchange::RegisterClipboardFormatW, Ole::*},
+        core::w,
+    };
+    unsafe {
+        OleInitialize(None)?;
+    }
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            unsafe {
+                OleUninitialize();
+            }
+        }
+    }
+    let _guard = Guard;
+    let size = remote.len();
+    let object = create(vec![PresentedFile {
+        name: "pattern.bin".into(),
+        source: Arc::new(remote),
+    }])?;
+    let stream = unsafe {
+        let mut medium = object.GetData(&format(
+            RegisterClipboardFormatW(w!("FileContents")) as u16,
+            0,
+            TYMED_ISTREAM,
+        ))?;
+        let stream = medium.u.pstm.as_ref().cloned();
+        ReleaseStgMedium(&mut medium);
+        stream.context("missing stream")?
+    };
+    let mut out = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)?;
+    let mut buffer = vec![0u8; MAX_CHUNK];
+    let mut offset = 0;
+    let start = Instant::now();
+    while offset < size {
+        let mut count = 0;
+        unsafe {
+            stream
+                .Read(
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len() as u32,
+                    Some(&mut count),
+                )
+                .ok()?;
+        }
+        ensure!(count > 0, "truncated COM stream");
+        out.write_all(&buffer[..count as usize])?;
+        offset += u64::from(count);
+    }
+    out.sync_all()?;
+    let seconds = start.elapsed().as_secs_f64();
+    ensure!(offset == size, "incorrect size");
+    println!(
+        "{}",
+        serde_json::json!({"mode":"com_to_disk", "bytes":offset, "seconds":seconds, "mib_s":offset as f64/1048576.0/seconds})
     );
     Ok(())
 }

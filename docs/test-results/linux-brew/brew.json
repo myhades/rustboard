@@ -1,0 +1,5 @@
+{
+  "fresh_install_no_initialization": true,
+  "upgrade_replaces_files_preserves_config_no_start": true,
+  "uninstall_removes_cli_preserves_config": true
+}

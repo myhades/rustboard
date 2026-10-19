@@ -13,6 +13,7 @@ struct Session {
     peer: Option<SocketAddr>,
     pin: String,
     approved: bool,
+    peer_approved: bool,
     cancel: bool,
     done: bool,
     error: String,
@@ -60,6 +61,7 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
             peer: None,
             pin: String::new(),
             approved: false,
+            peer_approved: false,
             cancel: false,
             done: false,
             error: String::new(),
@@ -118,8 +120,8 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                 {
                     state.lock().unwrap().socket = Some(ch.socket.try_clone()?);
                 }
-                ch.send(own.port())?;
-                let port = ch.receive(|| alive(&state.lock().unwrap()))?;
+                ch.send(u64::from(own.port()))?;
+                let port = u16::try_from(ch.receive(|| alive(&state.lock().unwrap()))?)?;
                 ensure!(port > 0, "invalid advertised port");
                 let peer = SocketAddr::new(ip, port);
                 if let Some(expected) = remote {
@@ -132,24 +134,20 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                     s.peer = Some(peer);
                     s.phase = "confirm".into();
                 }
-                loop {
-                    let s = state.lock().unwrap();
+                ch.confirm(|peer_approved| {
+                    let mut s = state.lock().unwrap();
                     ensure!(alive(&s), "pairing cancelled or expired");
-                    if s.approved {
-                        break;
-                    }
-                    drop(s);
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                ch.send(1)?;
-                ensure!(
-                    ch.receive(|| alive(&state.lock().unwrap()))? == 1,
-                    "peer declined pairing"
-                );
+                    s.peer_approved = peer_approved;
+                    Ok(s.approved)
+                })?;
                 ensure!(
                     alive(&state.lock().unwrap()),
                     "pairing cancelled or expired"
                 );
+                let clock = node.engine.lock().unwrap().clock();
+                ch.send(clock)?;
+                let clock = ch.receive(|| alive(&state.lock().unwrap()))?;
+                node.engine.lock().unwrap().observe_clock(clock)?;
                 crate::app::config::save_peer(
                     &dir,
                     &node.identity.pin(),
@@ -202,5 +200,7 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
         }
         _ => anyhow::bail!("unknown pairing operation"),
     }
-    Ok(json!({"ok":true,"phase":s.phase,"peer":s.peer,"fingerprint":s.pin,"error":s.error}))
+    Ok(
+        json!({"ok":true,"phase":s.phase,"peer":s.peer,"fingerprint":s.pin,"peer_approved":s.peer_approved,"error":s.error}),
+    )
 }

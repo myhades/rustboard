@@ -9,13 +9,49 @@ pub struct Channel {
 trait PairIo: Read + Write + Send {}
 impl<T: Read + Write + Send> PairIo for T {}
 impl Channel {
-    pub fn send(&mut self, value: u16) -> Result<()> {
+    pub fn confirm(&mut self, mut approved: impl FnMut(bool) -> Result<bool>) -> Result<()> {
+        let mut sent = false;
+        let mut bytes = [0; 8];
+        let mut offset = 0;
+        loop {
+            let received = offset == bytes.len();
+            if approved(received)? && !sent {
+                self.send(1)?;
+                sent = true;
+            }
+            if received {
+                if sent {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            match self.stream.read(&mut bytes[offset..]) {
+                Ok(0) => anyhow::bail!("peer declined pairing"),
+                Ok(n) => {
+                    offset += n;
+                    if offset == bytes.len() {
+                        ensure!(u64::from_be_bytes(bytes) == 1, "peer declined pairing");
+                    }
+                }
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::TimedOut
+                            | std::io::ErrorKind::Interrupted
+                    ) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+    pub fn send(&mut self, value: u64) -> Result<()> {
         self.stream.write_all(&value.to_be_bytes())?;
         self.stream.flush()?;
         Ok(())
     }
-    pub fn receive(&mut self, active: impl Fn() -> bool) -> Result<u16> {
-        let mut b = [0; 2];
+    pub fn receive(&mut self, active: impl Fn() -> bool) -> Result<u64> {
+        let mut b = [0; 8];
         let mut offset = 0;
         while offset < b.len() {
             ensure!(active(), "pairing cancelled or expired");
@@ -32,7 +68,7 @@ impl Channel {
                 Err(e) => return Err(e.into()),
             }
         }
-        Ok(u16::from_be_bytes(b))
+        Ok(u64::from_be_bytes(b))
     }
 }
 fn socket(socket: &TcpStream) -> Result<()> {
@@ -135,6 +171,10 @@ mod tests {
             assert_eq!(c.receive(|| true).unwrap(), 45452);
             std::thread::sleep(Duration::from_millis(350));
             c.send(45451).unwrap();
+            // The second confirmer can observe approval before making its own choice.
+            c.confirm(Ok).unwrap();
+            c.send(156).unwrap();
+            assert_eq!(c.receive(|| true).unwrap(), 3);
             let started = std::time::Instant::now();
             let error = c
                 .receive(|| started.elapsed() < Duration::from_millis(100))
@@ -146,6 +186,9 @@ mod tests {
         assert_eq!(c.pin, a.pin());
         c.send(45452).unwrap();
         assert_eq!(c.receive(|| true).unwrap(), 45451);
+        c.confirm(|_| Ok(true)).unwrap();
+        c.send(3).unwrap();
+        assert_eq!(c.receive(|| true).unwrap(), 156);
         t.join().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();

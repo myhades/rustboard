@@ -64,6 +64,17 @@ impl Engine {
         self.clock_path = Some(path);
         Ok(())
     }
+    pub fn clock(&self) -> u64 {
+        self.clock
+    }
+    pub fn observe_clock(&mut self, clock: u64) -> Result<()> {
+        ensure!(clock < u64::MAX - 1, "clock exhausted");
+        if clock > self.clock {
+            self.clock = clock;
+            self.save_clock()?;
+        }
+        Ok(())
+    }
     fn save_clock(&self) -> Result<()> {
         if let Some(path) = &self.clock_path {
             let temporary = path.with_extension("new");
@@ -332,6 +343,52 @@ mod tests {
         assert_eq!(e.current, current);
         e.withdraw();
         assert!(e.retained_offers().is_empty());
+    }
+    #[test]
+    fn pairing_clock_survives_restart_without_replacing_clipboard_or_watermark() {
+        let path = std::env::temp_dir().join(new_id());
+        let id = new_id();
+        let mut fresh = Engine::new(id.clone());
+        fresh.persist_clock(path.clone()).unwrap();
+        let mut established = Engine::new(new_id());
+        established.observe_clock(156).unwrap();
+        let previous = established
+            .local(
+                Content::Text {
+                    text: "previous".into(),
+                },
+                HashMap::new(),
+            )
+            .unwrap();
+        assert!(
+            fresh
+                .accept(previous.clone(), &established.device_id)
+                .unwrap()
+        );
+        established.observe_clock(200).unwrap();
+        let watermark = fresh.watermark.clone();
+        fresh.observe_clock(established.clock()).unwrap();
+        assert_eq!(fresh.current.as_ref(), Some(&previous));
+        assert_eq!(fresh.watermark, watermark);
+        assert!(fresh.observe_clock(u64::MAX - 1).is_err());
+        drop(fresh);
+        let mut fresh = Engine::new(id);
+        fresh.persist_clock(path.clone()).unwrap();
+        fresh.observe_clock(3).unwrap();
+        assert_eq!(fresh.clock(), 200);
+        assert!(!fresh.accept(previous, &established.device_id).unwrap());
+        established.clear_clipboard();
+        let offer = fresh
+            .local(
+                Content::Text {
+                    text: "first copy after pairing".into(),
+                },
+                HashMap::new(),
+            )
+            .unwrap();
+        assert_eq!(offer.event_sequence, 201);
+        assert!(established.accept(offer, &fresh.device_id).unwrap());
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn malformed_clock_is_rejected_without_overwrite() {

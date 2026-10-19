@@ -59,7 +59,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
     ensure!(
         matches!(
             cmd,
-            "status" | "start" | "stop" | "restart" | "config" | "pair" | "unpair"
+            "status" | "start" | "stop" | "restart" | "config" | "log" | "pair" | "unpair"
         ),
         "unknown command '{cmd}'; run 'rustboard help'"
     );
@@ -111,6 +111,12 @@ pub fn run(args: Vec<String>) -> Result<()> {
             service::edit(&p)?;
             println!("{}", p.display());
         }
+        "log" => {
+            let p = ipc::data_dir()?.join("logs/agent_rCURRENT.log");
+            ensure!(p.is_file(), "log not found: {}", p.display());
+            println!("{}", p.display());
+            service::edit(&p)?;
+        }
         "unpair" => {
             ensure!(args.len() == 2, "usage: rustboard unpair IP");
             let a: IpAddr = args[1].parse().map_err(|_| {
@@ -144,6 +150,7 @@ Commands:
   stop                Stop the service and disable login startup
   restart             Restart the service and apply saved configuration
   config              Open the configuration in your text editor
+  log                 Open the current log in your text editor
   pair [IP[:PORT]]    Wait for pairing or connect to a peer (default port: 45452)
   unpair IP           Remove pairing for an IP address
   help [COMMAND]      Show help for all commands or a specific command
@@ -166,6 +173,9 @@ Run 'rustboard help COMMAND' for command details."
         }
         "config" => {
             "config\n\nOpen the existing configuration using VISUAL, then EDITOR, or the system\ntext editor. VISUAL and EDITOR must name an executable.\nSave your changes, then run 'rustboard restart' to apply them."
+        }
+        "log" => {
+            "log\n\nPrint the current log file path and open it using VISUAL, then EDITOR,\nor the system text editor. VISUAL and EDITOR must name an executable."
         }
         "pair" => {
             "pair [IP[:PORT]]\n\nWithout an address, wait for an incoming pairing request. With an address,\nconnect to that peer; the default port is 45452. Use [IPv6]:PORT for IPv6\nwith an explicit port. Compare fingerprints on both peers before accepting.\nBoth services must be running. Each service restarts after pairing succeeds."
@@ -266,7 +276,7 @@ fn pair(target: Option<&str>) -> Result<()> {
                 prompted = true;
             }
             "saved" => {
-                println!("Peer added. Restarting service...");
+                println!("Peer added.");
                 drop(_guard);
                 service::stop(false).and_then(|_| service::start(false))?;
                 return Ok(());
@@ -277,8 +287,10 @@ fn pair(target: Option<&str>) -> Result<()> {
         if let Ok(ok) = rx.try_recv() {
             ensure!(!interrupt.interrupted(), "pairing cancelled");
             ensure!(ok, "pairing declined");
-            request(&["pair-approve", &id])?;
-            println!("Confirm on the other peer...");
+            let approval = request(&["pair-approve", &id])?;
+            if approval["peer_approved"] != true {
+                println!("Confirm on the other peer...");
+            }
         }
         std::thread::sleep(Duration::from_millis(300));
     }

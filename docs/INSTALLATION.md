@@ -108,7 +108,6 @@ Windows logs: `%LOCALAPPDATA%/Rustboard/agent.err.log` for installer-started pro
 
 ## Validation and limits
 
-Release evidence is recorded separately in [STATUS.md](STATUS.md); prior file-throughput measurements in [archived performance results](archive/PERFORMANCE_LAYERED.md) are historical, not proof of this installed build.
 
 No folder recursion, native inline-image fidelity, automatic updates, public notarization, universal application compatibility, restart-after-OS-reboot guarantee, or 10G performance claim. Previously measured file throughput is not a promise for every network. Clipboard data is not stored as history; retained synthetic test files are not included in packages.
 

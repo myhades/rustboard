@@ -1,13 +1,15 @@
 Rustboard prototype: text, ordinary files and clipboard images exposed as files.
 
-macOS builds are Apple Development signed, **not notarized**. After the Homebrew tap update:
+macOS builds are Apple Development signed, **not notarized**.
+
+Homebrew:
 
 ```sh
 brew tap myhades/rustboard https://github.com/myhades/rustboard
 brew install --cask myhades/rustboard/rustboard
 ```
 
-After the Scoop bucket update:
+Scoop:
 
 ```powershell
 scoop bucket add myhades https://github.com/myhades/rustboard

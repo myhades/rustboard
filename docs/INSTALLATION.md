@@ -49,9 +49,8 @@ rustboard config
 First start creates the default config and device identity using DPAPI/Keychain.
 On Mac it also registers File Provider and creates/loads the launchd service;
 on Windows it registers login startup and starts the user-session Agent.
-Later starts reuse existing identity, pairing and configuration. Configure a local
-listen address, save, then run `rustboard restart` before pairing. The default
-null listen address keeps networking off until configured.
+Later starts reuse existing identity, pairing and configuration. The default listener is `0.0.0.0:45452` (all IPv4 interfaces), so pairing works
+without editing config first. To bind a specific interface, edit listen and restart.
 
 Any system permission or execution approval belongs to running the program, not
 installation. Installers do not test first launch or handle Open Anyway.
@@ -70,7 +69,7 @@ The pairing-only TLS endpoint temporarily uses the configured listening port plu
 
 ## Daily commands
 
-- `status`: compact running state, login startup, active listen/mode, pending restart and active paired-device list. Offline it shows saved peers. This is not a continuous peer connectivity probe. `status --json` is the machine-readable active state and fails when the Agent is unreachable.
+- `status`: compact running state, active listen/mode and active paired-device list. Offline it shows saved peers. This is not a continuous peer connectivity probe. `status --json` is the machine-readable active state and fails when the Agent is unreachable.
 - `start`: immediately starts the installed default service and enables login startup.
 - `stop`: immediately stops it and disables login startup, including launchd KeepAlive. It preserves identity/config/pairs.
 - `restart`: restarts an enabled service; a disabled service requires `start`.

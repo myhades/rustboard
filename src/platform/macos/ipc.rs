@@ -163,7 +163,7 @@ impl Server {
                                         stream.set_read_timeout(None)?;
                                         Ok(IpcReply::Other(serde_json::json!({"ok":true,"protocol":1})))
                                     },
-                                    IpcOperation::Control { args } => server.handle(&node, args).map(IpcReply::Other),
+                                    IpcOperation::Control { args } => Ok(IpcReply::Other(server.handle(&node, args).unwrap_or_else(|error| serde_json::json!({"ok":false,"protocol":1,"code":"io","error":format!("{error:#}")})))) ,
                                     op => node.local_ipc_session_reply(op, retained.clone()),
                                 }
                             })().unwrap_or_else(|error| {

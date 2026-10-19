@@ -34,7 +34,7 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
         let config = crate::app::config::load(dir)?;
         let own: SocketAddr = config["listen"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("configure listen first"))?
+            .ok_or_else(|| anyhow::anyhow!("Listening is disabled. Set listen to 0.0.0.0:45452 in rustboard config, then run rustboard restart."))?
             .parse()?;
         let remote = if args.len() == 2 {
             Some(args[1].parse::<SocketAddr>()?)

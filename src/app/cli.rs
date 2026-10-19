@@ -67,27 +67,20 @@ pub fn run(args: Vec<String>) -> Result<()> {
     );
     match cmd {
         "status" => {
-            let enabled = service::enabled()?;
             let running = request(&["status"]);
             println!(
-                "  Service    {}\n  Auto-start {}",
+                "  Service    {}",
                 if running.is_ok() {
                     "running"
                 } else {
                     "unavailable"
-                },
-                if enabled { "enabled" } else { "disabled" }
+                }
             );
             if let Ok(v) = running {
                 println!(
-                    "  Listen     {}\n  Mode       {}\n  Config     {}",
+                    "  Listen     {}\n  Mode       {}",
                     v["listen"].as_str().unwrap_or("off"),
-                    v["mode"].as_str().unwrap_or("unknown"),
-                    if v["pending_restart"] == true {
-                        "restart required"
-                    } else {
-                        "loaded"
-                    }
+                    v["mode"].as_str().unwrap_or("unknown")
                 );
                 print_peers(&v["peers"]);
             } else {
@@ -101,11 +94,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
         }
         "start" => {
             service::start(true)?;
-            println!("Started. Login startup enabled.");
+            println!("Started.");
         }
         "stop" => {
             service::stop(true)?;
-            println!("Stopped. Login startup disabled.");
+            println!("Stopped.");
         }
         "restart" => {
             ensure!(
@@ -114,7 +107,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
             );
             service::stop(false)?;
             service::start(false)?;
-            println!("Restarted; configuration loaded.");
+            println!("Restarted.");
         }
         "config" => {
             let p = config_path()?;
@@ -170,7 +163,7 @@ Run 'rustboard help COMMAND' for command details."
     };
     let detail = match command {
         "status" => {
-            "status [--json]\n\nShow service state, login startup, active settings and paired devices.\nPeer entries show saved trust, not connection status.\nWith --json, print the Agent response; fail if the Agent is unavailable."
+            "status [--json]\n\nShow service state, listen address, mode and paired devices.\nPeer entries show saved trust, not connection status.\nWith --json, print the Agent response; fail if the Agent is unavailable."
         }
         "start" => "start\n\nStart the service now and enable automatic startup at login.",
         "stop" => {

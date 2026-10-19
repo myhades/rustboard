@@ -36,7 +36,7 @@ pub fn load(dir: &Path) -> Result<Value> {
     let value = if path.exists() {
         read_json(&path)?
     } else {
-        json!({"schema":2,"listen":null,"mode":"all","macos_eager_download":false,"peers":[],"identity":null})
+        json!({"schema":2,"listen":"0.0.0.0:45452","mode":"all","macos_eager_download":false,"peers":[],"identity":null})
     };
     validate(&value)?;
     Ok(value)
@@ -226,6 +226,14 @@ mod tests {
 #[cfg(test)]
 mod validation_tests {
     use super::*;
+    #[test]
+    fn fresh_config_has_default_listener_without_writing_files() {
+        let dir = std::env::temp_dir().join(crate::core::engine::new_id());
+        let value = load(&dir).unwrap();
+        assert_eq!(value["listen"], "0.0.0.0:45452");
+        assert!(value["identity"].is_null());
+        assert!(!dir.exists());
+    }
     #[test]
     fn unpair_ip_removes_all_ports_and_preserves_other_devices() {
         let dir = std::env::temp_dir().join(crate::core::engine::new_id());

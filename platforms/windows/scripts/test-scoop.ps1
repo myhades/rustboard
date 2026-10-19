@@ -17,7 +17,7 @@ git -C $bucket -c user.name=CI -c user.email=ci@example.invalid add .
 git -C $bucket -c user.name=CI -c user.email=ci@example.invalid commit -m fixture
 $server=Start-Process python -ArgumentList '-m','http.server','18765','--bind','127.0.0.1','--directory','target/release-assets' -WindowStyle Hidden -PassThru
 try {
-    & $scoop bucket add rustboard $bucket
+    & $scoop bucket add rustboard ([Uri]::new($bucket).AbsoluteUri)
     & $scoop install rustboard/rustboard
     $cli=Join-Path $env:SCOOP 'shims/rustboard.exe'
     & $cli status --json
@@ -30,6 +30,7 @@ try {
     $manifest.version='999.0.0'
     $manifest | ConvertTo-Json -Depth 16 | Set-Content $path
     git -C $bucket -c user.name=CI -c user.email=ci@example.invalid commit -am upgrade
+    & $scoop update
     & $scoop update rustboard
     $installed=Get-Content (Join-Path $env:SCOOP 'apps/rustboard/current/manifest.json') -Raw | ConvertFrom-Json
     if ($installed.version -ne '999.0.0') {throw 'Scoop did not install the new version'}

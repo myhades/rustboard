@@ -235,3 +235,11 @@ exist only in that application's private environment. Do not use such a terminal
 to accept a normal-user installation. Verify `rustboard status` and `rustboard
 config` from a separately opened PowerShell session. Rustboard does not search or
 migrate application-private configuration directories.
+
+Certificate DER and the Windows DPAPI blob are stored as single-line standard
+Base64 strings. Base64 is only an encoding; the private key is still protected by
+DPAPI on Windows and Keychain on macOS. The public 0.1.0 build uses byte arrays;
+this source change does not add an automatic legacy reader or regenerate identity.
+Existing 0.1.0 configurations must have those exact bytes re-encoded once when
+installing the next build. Do not change a live 0.1.0 configuration to this format
+before replacing its Agent. Fingerprints and pairings must remain unchanged.

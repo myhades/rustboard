@@ -1,5 +1,6 @@
 //! Current-user DPAPI. No machine scope, password, or custom cryptography.
 use anyhow::{Result, ensure};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use windows::{
     Win32::{
@@ -49,14 +50,18 @@ fn crypt(bytes: &[u8], protect: bool) -> Result<Vec<u8>> {
     }
 }
 pub fn store(_account: &str, key: &[u8]) -> Result<Value> {
-    Ok(json!({"provider":"windows-dpapi","blob":crypt(key,true)?}))
+    Ok(json!({"provider":"windows-dpapi","blob":STANDARD.encode(crypt(key,true)?)}))
 }
 pub fn load(reference: &Value) -> Result<Vec<u8>> {
     ensure!(
         reference["provider"] == "windows-dpapi",
         "identity requires Windows DPAPI"
     );
-    let blob: Vec<u8> = serde_json::from_value(reference["blob"].clone())?;
+    let blob = STANDARD.decode(
+        reference["blob"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("DPAPI blob must be base64 text"))?,
+    )?;
     crypt(&blob, false)
 }
 #[cfg(test)]
@@ -67,7 +72,11 @@ mod tests {
         let key = b"synthetic secret";
         let mut reference = store("test", key).unwrap();
         assert_eq!(load(&reference).unwrap(), key);
-        reference["blob"][30] = (reference["blob"][30].as_u64().unwrap() ^ 1).into();
+        let mut blob = STANDARD
+            .decode(reference["blob"].as_str().unwrap())
+            .unwrap();
+        blob[30] ^= 1;
+        reference["blob"] = STANDARD.encode(blob).into();
         assert!(load(&reference).is_err());
     }
 }

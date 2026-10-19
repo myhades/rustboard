@@ -61,3 +61,9 @@ initial claim of normal-user config/autostart acceptance was incorrect. Scoop
 archive download, hashing and shim creation did pass, but normal-user installation
 must be repaired and checked outside that process environment. This is an
 installation-context correction, not a runtime config-format migration.
+
+The user subsequently ran a one-off repair from ordinary PowerShell: copied the
+existing config and sequence clock, then ran the package installer outside Codex.
+The user confirmed `rustboard config` opens successfully. Device fingerprint and
+paired peer reported by the restarted Agent remained unchanged. This repair is
+not shipped as a runtime migration or compatibility search.

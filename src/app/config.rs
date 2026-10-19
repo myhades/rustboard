@@ -8,6 +8,7 @@ use crate::platform::macos::credential;
 #[cfg(windows)]
 use crate::platform::windows::credential;
 use anyhow::{Result, ensure};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::{io::Write, net::SocketAddr, path::Path, sync::Mutex};
 static ACTIVE: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
@@ -119,7 +120,11 @@ fn write(dir: &Path, value: &Value) -> Result<()> {
     result
 }
 fn restore(value: &Value) -> Result<Identity> {
-    let cert: Vec<u8> = serde_json::from_value(value["identity"]["certificate_der"].clone())?;
+    let cert = STANDARD.decode(
+        value["identity"]["certificate_der"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("certificate_der must be base64 text"))?,
+    )?;
     let key = credential::load(&value["identity"]["private_key"])?;
     Identity::from_parts(cert, key)
 }
@@ -132,7 +137,7 @@ pub fn startup(dir: &Path) -> Result<(Identity, Vec<Peer>)> {
     // Existing protected credentials are never replaced on a read/decrypt error.
     if value["identity"].is_null() {
         let identity = Identity::generate()?;
-        value["identity"] = json!({"certificate_der":identity.cert,"private_key":credential::store(&identity.pin(),identity.private_key_der())?});
+        value["identity"] = json!({"certificate_der":STANDARD.encode(&identity.cert),"private_key":credential::store(&identity.pin(),identity.private_key_der())?});
         restore(&value)?;
         write(dir, &value)?;
     }
@@ -210,7 +215,7 @@ mod tests {
         unpair_ip(&dir, peer.address.ip()).unwrap();
         assert!(startup(&dir).unwrap().1.is_empty());
         let mut broken = load(&dir).unwrap();
-        broken["identity"]["private_key"]["blob"] = json!([1, 2, 3]);
+        broken["identity"]["private_key"]["blob"] = json!(STANDARD.encode([1, 2, 3]));
         write(&dir, &broken).unwrap();
         assert!(startup(&dir).is_err());
         assert_eq!(load(&dir).unwrap(), broken);

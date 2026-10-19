@@ -124,10 +124,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 p.display()
             );
             service::edit(&p)?;
-            println!(
-                "Config: {}\nRun rustboard restart after saving.",
-                p.display()
-            );
+            println!("{}", p.display());
         }
         "unpair" => {
             ensure!(args.len() == 2, "usage: rustboard unpair IP");

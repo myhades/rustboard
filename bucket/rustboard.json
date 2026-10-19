@@ -1,0 +1,24 @@
+{
+  "version": "0.1.0",
+  "description": "Native clipboard synchronization with lazy file transfer",
+  "homepage": "https://github.com/myhades/rustboard",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/myhades/rustboard/releases/download/v0.1.0/rustboard-0.1.0-windows-x64.zip",
+      "hash": "759172aa4b4c82da7dd3e6313348a8392fbb156a349c72c492c08d977ef0a42f"
+    }
+  },
+  "bin": "bin/rustboard.exe",
+  "pre_install": "if ($global) { throw 'Rustboard must be installed per user, without --global' }",
+  "installer": {
+    "script": "& \"$dir\\platforms\\windows\\scripts\\install.ps1\" -Source \"$dir\\bin\" -NoPath"
+  },
+  "uninstaller": {
+    "script": "if ($cmd -eq \"uninstall\") { & \"$dir\\platforms\\windows\\scripts\\uninstall.ps1\" }"
+  },
+  "notes": [
+    "Configure with rustboard config/pair, then reload.",
+    "Uninstall retains identity and pairing. Scoop manages the CLI shim."
+  ]
+}

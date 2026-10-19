@@ -1,6 +1,6 @@
 # Installation and operation
 
-Scope: paired Windows/macOS machines on a trusted local network. User-session Agent, native clipboard, mutual TLS certificate pins, lazy ordinary-file transfer. This is a prototype, not a notarized/public production release. No README is shipped.
+Rustboard synchronizes text and files between paired Windows, macOS and Linux computers. It runs in the user session and uses mutual TLS with pinned device certificates. File contents are transferred on demand. See [Linux setup](LINUX.md) for desktop and package requirements.
 
 ## Supported behavior
 
@@ -61,7 +61,7 @@ configuration and pairing.
 
 Use `rustboard` in a new terminal after installation, or use the installed CLI path shown above.
 
-On the receiving machine run `rustboard pair`. It displays its certificate fingerprint and waits for up to 120 seconds. On the other machine run `rustboard pair <IP>[:port]` (default port 45452). Both terminals show the other device's certificate fingerprint. Compare each against the fingerprint displayed locally on the other machine, and confirm on BOTH sides. Enter accepts the default Yes; `n` or EOF declines. After both sides save the pairing, each CLI restarts its local service automatically.
+On the receiving machine run `rustboard pair`. It displays its certificate fingerprint and waits for up to 120 seconds. On the other machine run `rustboard pair <IP>[:port]` (default port 45452). Both terminals show the other device's certificate fingerprint. Compare each against the fingerprint displayed locally on the other machine, and enter `y` on both sides. Enter, `n` or EOF declines. After both sides save the pairing, each CLI restarts its local service automatically.
 
 The pairing-only TLS endpoint temporarily uses the configured listening port plus one (e.g. sync 45452, enrollment 45453). That port must be reachable; Rustboard does not alter firewalls. It accepts only identity/confirmation records, never clipboard/file requests. Closing the CLI normally cancels immediately; forced terminal loss closes the window within ten seconds. The total session expires after 120 seconds. TLS proves possession of each displayed certificate's private key; human fingerprint comparison authorizes the identity. No discovery or automatic trust-on-first-use is added.
 
@@ -72,11 +72,12 @@ The pairing-only TLS endpoint temporarily uses the configured listening port plu
 `start`, `stop` and `restart` are silent on success. Failures print an error to
 stderr and return a nonzero exit code. Pairing retains its interactive prompts.
 
-- `status`: compact running state, active listen/mode and active paired-device list. Offline it shows saved peers. This is not a continuous peer connectivity probe. `status --json` is the machine-readable active state and fails when the Agent is unreachable.
+- `status`: service state, active listen/mode and peers. When stopped, only the service state is shown. `status --json` prints the Agent response and fails when the Agent is unreachable.
 - `start`: immediately starts the installed default service and enables login startup.
 - `stop`: immediately stops it and disables login startup, including launchd KeepAlive. It preserves identity/config/pairs.
 - `restart`: restarts an enabled service; a disabled service requires `start`.
 - `config`: opens config with VISUAL/EDITOR (an executable path), otherwise Windows Notepad or the macOS default text editor. Save and manually restart.
+- `log`: prints the current log path and opens it in the same text editor.
 - `pair [IP[:port]]`, `unpair IP`, `help [COMMAND]`, `version`.
 
 There are no public pause/resume/mode/peers/doctor commands. Change mode in config. Pair requires a running Agent; config/status/unpair work with the Agent stopped. Service commands only target the installed default profile.
@@ -89,12 +90,19 @@ Mac default profile: signed App Group container's `default/` directory, normally
 Editable settings in `config.json` (excerpt):
 
 ```json
-{"listen":"192.168.100.6:45451","mode":"all"}
+{
+  "listen": "0.0.0.0:45452",
+  "mode": "all",
+
+  "advanced": {
+    "macos_eager_download": false
+  }
+}
 ```
 
 Use the machine's own address/port. CLI `--listen` on the Agent overrides the file for that run. Updating listen requires restarting the Agent; installation does not change the configuration or startup setting. A null listen address disables the listener; an unavailable configured address fails startup rather than silently listening on every interface.
 
-Configuration edits, pairing and unpairing are saved for the next startup, without live reload. `status` reports pending changes. Run `rustboard restart` after editing. Package restart scripts are wrappers for that command. To immediately revoke access, use `stop` (also disables login startup); a later `start` loads the saved config.
+Configuration edits and unpairing take effect after `rustboard restart`. Successful pairing restarts the service automatically. To immediately revoke access, use `stop`; a later `start` loads the saved config.
 
 `peers` is an array of `{ "address": "IP:port", "fingerprint": "64 lowercase SHA-256 hex characters" }`. `identity.certificate_der` contains the public certificate bytes. Keep the automatically managed `identity` section intact.
 
@@ -118,7 +126,7 @@ No folder recursion, native inline-image fidelity, automatic updates, public not
 
 ### macOS small-file eager download (optional)
 
-Add `"macos_eager_download": true` to the top level of `config.json`, then run
+Set `advanced.macos_eager_download` to `true` in `config.json`, then run
 `rustboard restart`. The default is false (also when omitted); Windows ignores this
 macOS-only setting. Existing identity and peer entries stay unchanged.
 
@@ -204,7 +212,7 @@ References: [Apple local network privacy](https://developer.apple.com/documentat
 
 ### File Provider cache lifetime
 
-`macos_eager_download` starts background downloads only when every size is known and the
+`advanced.macos_eager_download` starts background downloads only when every size is known and the
 entire batch totals less than 50,000,000 bytes, even without a paste. Exactly
 50,000,000 bytes, unknown sizes and larger batches remain lazy. This is a batch
 eligibility threshold; it does not bound accumulated File Provider disk use.

@@ -67,8 +67,8 @@ scoop update rustboard
 scoop uninstall rustboard
 ```
 
-Scoop owns its shim; the vendor install runs with -NoPath. Updates preserve the
-Agent's enabled/disabled state. Only an actual uninstall removes installed
+Scoop owns its shim; the vendor install runs with -NoPath. Stop Rustboard before
+upgrading, then run `rustboard start` when ready. Only an actual uninstall removes installed
 binaries/startup, and identity/config remain in LocalAppData. No duplicate user
 PATH entry is added by the vendor script.
 

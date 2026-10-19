@@ -1,4 +1,15 @@
-Rustboard prototype: text, ordinary files and clipboard images exposed as files.
+Rustboard 0.2.0: text, ordinary files and clipboard images exposed as files.
+
+- Linux support for X11, GNOME Wayland and Wayland data-control, with Homebrew packaging.
+- Streamed TLS file responses and reusable receive buffers.
+- Pairing synchronizes clipboard sequence counters and supports cancellation with Ctrl+C.
+- Simplified CLI output and a `log` command that opens the current Agent log.
+- Advanced settings are grouped under `advanced` in `config.json`.
+
+Before upgrading, run `rustboard stop`. Move the existing top-level
+`macos_eager_download` setting into `advanced.macos_eager_download`, keeping
+`peers` and `identity` unchanged. Install the update, then run `rustboard start`.
+When pairing again, both peers must use the updated pairing implementation.
 
 macOS builds are Apple Development signed, **not notarized**.
 

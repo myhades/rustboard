@@ -25,7 +25,7 @@ try {
     if (Get-Process rustboardd -ErrorAction SilentlyContinue) {throw 'Installation started Agent'}
     if (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Rustboard -ErrorAction SilentlyContinue) {throw 'Installation enabled startup'}
     $pairOutput=& $cli pair 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0 -or $pairOutput -notmatch "Run 'rustboard start' first") {throw 'Pair did not require explicit start'}
+    if ($LASTEXITCODE -eq 0 -or $pairOutput -notmatch 'rustboard: not running') {throw 'Pair did not require explicit start'}
     if (Test-Path $config) {throw 'Pair initialized config'}
     & $cli start
     if ($LASTEXITCODE) {throw 'First start failed'}

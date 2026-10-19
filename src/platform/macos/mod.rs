@@ -166,7 +166,7 @@ pub fn run() -> Result<()> {
         }
     }
     let (identity, peers) = crate::app::config::startup(&dir)?;
-    let eager_download = crate::app::config::load(&dir)?["macos_eager_download"]
+    let eager_download = crate::app::config::load(&dir)?["advanced"]["macos_eager_download"]
         .as_bool()
         .unwrap_or(false);
     let node = Node::new(identity, peers);

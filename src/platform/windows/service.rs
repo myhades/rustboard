@@ -1,12 +1,22 @@
 //! Current-user startup registration and background process lifecycle.
 use anyhow::{Result, ensure};
 use std::{
-    os::windows::process::CommandExt,
+    os::windows::{
+        io::{AsRawHandle, FromRawHandle, OwnedHandle},
+        process::CommandExt,
+    },
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::Duration,
+    time::{Duration, Instant},
 };
-const KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+use windows::{
+    Win32::{
+        Foundation::*,
+        System::{Diagnostics::ToolHelp::*, Registry::*, Threading::*},
+    },
+    core::{PCWSTR, PWSTR, w},
+};
+const KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 fn base() -> Result<PathBuf> {
     ensure!(
         super::ipc::profile()? == "default",
@@ -21,34 +31,43 @@ fn command(name: &str) -> Command {
 }
 pub fn enabled() -> Result<bool> {
     base()?;
-    let out = command("reg.exe")
-        .args(["query", KEY, "/v", "Rustboard"])
-        .output()?;
-    Ok(out.status.success())
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            KEY,
+            w!("Rustboard"),
+            RRF_RT_REG_SZ,
+            None,
+            None,
+            None,
+        )
+    };
+    match result {
+        ERROR_SUCCESS => Ok(true),
+        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => Ok(false),
+        error => Err(windows::core::Error::from_hresult(error.to_hresult()).into()),
+    }
 }
 pub fn start(register: bool) -> Result<()> {
     let base = base()?;
     let agent = base.join("bin/rustboardd.exe");
     ensure!(agent.is_file(), "Rustboard is not installed");
     if register {
-        ensure!(
-            command("reg.exe")
-                .args([
-                    "add",
-                    KEY,
-                    "/v",
-                    "Rustboard",
-                    "/t",
-                    "REG_SZ",
-                    "/d",
-                    &format!("\"{}\"", agent.display()),
-                    "/f"
-                ])
-                .output()?
-                .status
-                .success(),
-            "failed to enable login startup"
-        );
+        let value: Vec<u16> = format!("\"{}\"", agent.display())
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        unsafe {
+            RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                KEY,
+                w!("Rustboard"),
+                REG_SZ.0,
+                Some(value.as_ptr().cast()),
+                (value.len() * 2) as u32,
+            )
+            .ok()?;
+        }
     }
     if crate::app::cli::request(&["status"]).is_ok() {
         return Ok(());
@@ -71,39 +90,81 @@ pub fn start(register: bool) -> Result<()> {
     }
     anyhow::bail!("Agent did not start; inspect agent.err.log (login startup may remain enabled)")
 }
-fn running() -> Result<bool> {
-    let script = "$p=Join-Path $env:LOCALAPPDATA 'Rustboard/bin/rustboardd.exe'; @(Get-Process rustboardd -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $p}).Count";
-    let out = command("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .output()?;
-    ensure!(out.status.success(), "cannot inspect Agent processes");
-    Ok(String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse::<usize>()?
-        > 0)
-}
 pub fn stop(unregister: bool) -> Result<()> {
-    base()?;
-    if unregister && enabled()? {
-        ensure!(
-            command("reg.exe")
-                .args(["delete", KEY, "/v", "Rustboard", "/f"])
-                .output()?
-                .status
-                .success(),
-            "failed to disable login startup"
-        );
-    }
-    if running()? {
-        crate::app::cli::request(&["stop"])?;
-    }
-    for _ in 0..10 {
-        if !running()? {
-            return Ok(());
+    let agent = base()?.join("bin/rustboardd.exe");
+    if unregister {
+        let result = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, KEY, w!("Rustboard")) };
+        if result != ERROR_FILE_NOT_FOUND && result != ERROR_PATH_NOT_FOUND {
+            result.ok()?;
         }
-        std::thread::sleep(Duration::from_millis(200));
     }
-    anyhow::bail!("Agent did not stop")
+    // Keep handles until shutdown completes: an exited PID may be reused.
+    let mut processes = Vec::new();
+    unsafe {
+        let snapshot =
+            OwnedHandle::from_raw_handle(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)?.0);
+        let snapshot_handle = HANDLE(snapshot.as_raw_handle());
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut next = Process32FirstW(snapshot_handle, &mut entry);
+        while next.is_ok() {
+            let length = entry
+                .szExeFile
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            if String::from_utf16_lossy(&entry.szExeFile[..length])
+                .eq_ignore_ascii_case("rustboardd.exe")
+            {
+                // Other users' processes may be inaccessible; processes can also exit here.
+                if let Ok(handle) = OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                    false,
+                    entry.th32ProcessID,
+                ) {
+                    let process = OwnedHandle::from_raw_handle(handle.0);
+                    let mut path = vec![0u16; 32768];
+                    let mut length = path.len() as u32;
+                    if QueryFullProcessImageNameW(
+                        handle,
+                        PROCESS_NAME_WIN32,
+                        PWSTR(path.as_mut_ptr()),
+                        &mut length,
+                    )
+                    .is_ok()
+                        && String::from_utf16_lossy(&path[..length as usize])
+                            .eq_ignore_ascii_case(&agent.to_string_lossy().replace('/', "\\"))
+                    {
+                        processes.push(process);
+                    }
+                }
+            }
+            next = Process32NextW(snapshot_handle, &mut entry);
+        }
+        if let Err(error) = next
+            && error.code() != ERROR_NO_MORE_FILES.to_hresult()
+        {
+            return Err(error.into());
+        }
+    }
+    if processes.is_empty() {
+        return Ok(());
+    }
+    crate::app::cli::request(&["stop"])?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    for process in processes {
+        let timeout = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u32;
+        match unsafe { WaitForSingleObject(HANDLE(process.as_raw_handle()), timeout) } {
+            WAIT_OBJECT_0 => {}
+            WAIT_TIMEOUT => anyhow::bail!("Agent did not stop"),
+            _ => return Err(windows::core::Error::from_win32().into()),
+        }
+    }
+    Ok(())
 }
 pub fn edit(path: &Path) -> Result<()> {
     let editor = std::env::var("VISUAL")

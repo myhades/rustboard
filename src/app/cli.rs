@@ -40,15 +40,13 @@ fn config_path() -> Result<PathBuf> {
     Ok(ipc::data_dir()?.join("config.json"))
 }
 pub fn run(args: Vec<String>) -> Result<()> {
-    let cmd = args.first().map(String::as_str).unwrap_or("--help");
-    if cmd == "--help" {
-        println!(
-            "Rustboard {}\n\n  status                 Show service and paired devices\n  start                  Start now and enable login startup\n  stop                   Stop now and disable login startup\n  restart                Restart service (preserves startup setting)\n  reload                 Apply saved config by restarting service\n  config                 Open config in your text editor\n  pair [IP[:port]]        Wait for pairing, or connect and confirm\n  unpair IP[:port]        Remove a peer; restart to apply\n\n  --help  --version\n\nDefault port: 45452. Pairing uses the next TCP port temporarily.",
-            env!("CARGO_PKG_VERSION")
-        );
-        return Ok(());
+    let cmd = args.first().map(String::as_str).unwrap_or("help");
+    if cmd == "help" {
+        ensure!(args.len() <= 2, "usage: rustboard help [COMMAND]");
+        return help(args.get(1).map(String::as_str));
     }
-    if cmd == "--version" {
+    if cmd == "version" {
+        ensure!(args.len() == 1, "usage: rustboard version");
         println!("rustboard {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
@@ -59,21 +57,20 @@ pub fn run(args: Vec<String>) -> Result<()> {
     ensure!(
         matches!(
             cmd,
-            "status" | "start" | "stop" | "restart" | "reload" | "config" | "pair" | "unpair"
+            "status" | "start" | "stop" | "restart" | "config" | "pair" | "unpair"
         ),
-        "unknown command; use --help"
+        "unknown command '{cmd}'; run 'rustboard help'"
     );
     ensure!(
         args.len() == 1 || (matches!(cmd, "pair" | "unpair") && args.len() == 2),
-        "invalid arguments; use --help"
+        "unexpected arguments; run 'rustboard help {cmd}'"
     );
     match cmd {
         "status" => {
             let enabled = service::enabled()?;
             let running = request(&["status"]);
             println!(
-                "Rustboard {}\n  Service    {}\n  Auto-start {}",
-                env!("CARGO_PKG_VERSION"),
+                "  Service    {}\n  Auto-start {}",
                 if running.is_ok() {
                     "running"
                 } else {
@@ -110,7 +107,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
             service::stop(true)?;
             println!("Stopped. Login startup disabled.");
         }
-        "restart" | "reload" => {
+        "restart" => {
             ensure!(
                 service::enabled()?,
                 "service is disabled; use start to enable it"
@@ -121,20 +118,28 @@ pub fn run(args: Vec<String>) -> Result<()> {
         }
         "config" => {
             let p = config_path()?;
-            ensure!(p.exists(), "install and initialize Rustboard first");
+            ensure!(
+                p.is_file(),
+                "configuration not found: {}; install Rustboard for this user first",
+                p.display()
+            );
             service::edit(&p)?;
             println!(
-                "Config: {}\nRun rustboard reload after saving.",
+                "Config: {}\nRun rustboard restart after saving.",
                 p.display()
             );
         }
         "unpair" => {
-            ensure!(args.len() == 2, "unpair requires IP[:port]");
-            let a = address(&args[1])?;
+            ensure!(args.len() == 2, "usage: rustboard unpair IP");
+            let a: IpAddr = args[1].parse().map_err(|_| {
+                anyhow::anyhow!(
+                    "expected an IP address without a port; run 'rustboard help unpair'"
+                )
+            })?;
             if request(&["status"]).is_ok() {
-                request(&["unpair-address", &a.to_string()])?;
+                request(&["unpair-ip", &a.to_string()])?;
             } else {
-                crate::app::config::unpair_address(&ipc::data_dir()?, a)?;
+                crate::app::config::unpair_ip(&ipc::data_dir()?, a)?;
             }
             println!("Removed {a}. Restart to revoke existing trust.");
         }
@@ -143,14 +148,72 @@ pub fn run(args: Vec<String>) -> Result<()> {
     }
     Ok(())
 }
+fn help(command: Option<&str>) -> Result<()> {
+    let Some(command) = command else {
+        println!(
+            "\
+Synchronize the clipboard between paired computers.
+
+Usage: rustboard COMMAND [ARGUMENTS]
+
+Commands:
+  status [--json]     Show service state and paired devices
+  start               Start the service and enable login startup
+  stop                Stop the service and disable login startup
+  restart             Restart the service and apply saved configuration
+  config              Open the configuration in your text editor
+  pair [IP[:PORT]]    Wait for pairing or connect to a device (default port: 45452)
+  unpair IP           Remove pairing for an IP address
+  help [COMMAND]      Show help for all commands or a specific command
+  version             Show the installed CLI version
+
+Run 'rustboard help COMMAND' for command details."
+        );
+        return Ok(());
+    };
+    let detail = match command {
+        "status" => {
+            "status [--json]\n\nShow service state, login startup, active settings and paired devices.\nPeer entries show saved trust, not connection status.\nWith --json, print the Agent response; fail if the Agent is unavailable."
+        }
+        "start" => "start\n\nStart the service now and enable automatic startup at login.",
+        "stop" => {
+            "stop\n\nStop the service now and disable automatic startup at login.\nKeep configuration, device identity and paired devices."
+        }
+        "restart" => {
+            "restart\n\nRestart the service to apply configuration and pairing changes.\nActive transfers are interrupted. A disabled service requires 'rustboard start'."
+        }
+        "config" => {
+            "config\n\nOpen the existing configuration using VISUAL, then EDITOR, or the system\ntext editor. VISUAL and EDITOR must name an executable.\nSave your changes, then run 'rustboard restart' to apply them."
+        }
+        "pair" => {
+            "pair [IP[:PORT]]\n\nWithout an address, wait for an incoming pairing request. With an address,\nconnect to that device; the default port is 45452. Use [IPv6]:PORT for IPv6\nwith an explicit port. Compare fingerprints on both devices before accepting.\nBoth services must be running. Restart both services after pairing succeeds."
+        }
+        "unpair" => {
+            "unpair IP\n\nRemove all saved pairings at the specified IPv4 or IPv6 address. Do not\ninclude a port. Restart the service to revoke existing trust.\nTo revoke access immediately, stop the service before removing the pairing."
+        }
+        "help" => "help [COMMAND]\n\nShow the command list or help for one command.",
+        "version" => "version\n\nShow the version of this CLI executable.",
+        _ => anyhow::bail!("unknown command '{command}'; run 'rustboard help'"),
+    };
+    println!("Usage: rustboard {detail}");
+    Ok(())
+}
 fn print_peers(peers: &Value) {
     let peers = peers.as_array();
-    println!("\n  Paired devices ({})", peers.map_or(0, Vec::len));
-    if let Some(peers) = peers {
+    println!("\nPaired devices ({})", peers.map_or(0, Vec::len));
+    if let Some(peers) = peers.filter(|p| !p.is_empty()) {
+        let width = peers
+            .iter()
+            .filter_map(|p| p["address"].as_str())
+            .map(str::len)
+            .max()
+            .unwrap_or(7)
+            .max(7);
+        println!("  {:<width$}  FINGERPRINT", "ADDRESS");
         for p in peers {
             let pin = p["fingerprint"].as_str().unwrap_or("");
             println!(
-                "    {:<24} {}",
+                "  {:<width$}  {}",
                 p["address"].as_str().unwrap_or("?"),
                 &pin[..pin.len().min(12)]
             );
@@ -176,7 +239,7 @@ fn pair(target: Option<&str>) -> Result<()> {
     }
     let _guard = Cancel(id.clone());
     println!(
-        "Local fingerprint:\n  {}\nWaiting for pairing (120 seconds).",
+        "Local fingerprint:\n  {}\nWaiting for pairing...",
         group(v["fingerprint"].as_str().unwrap_or(""))
     );
     let (tx, rx) = std::sync::mpsc::channel();

@@ -50,3 +50,14 @@ published this round. Thus the public 0.1.0 archive still contains the original
 installer. The Mac is currently running the public 0.1.0 binaries installed with
 the corrected script; Brew records 0.1.0. The fix must be packaged in the next
 release before claiming this upgrade defect is fixed for download users.
+
+## Correction: Windows user-shell acceptance
+
+The initial Windows validation above was performed from Codex's packaged process
+environment. On subsequent testing, the user's ordinary PowerShell could reach
+Agent IPC but could not see config.json or the Run registration. Both had been
+redirected into Codex MSIX state (LocalCache/Local/Rustboard for files). Thus the
+initial claim of normal-user config/autostart acceptance was incorrect. Scoop
+archive download, hashing and shim creation did pass, but normal-user installation
+must be repaired and checked outside that process environment. This is an
+installation-context correction, not a runtime config-format migration.

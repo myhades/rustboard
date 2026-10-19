@@ -55,7 +55,7 @@ On the receiving machine run `rustboard pair`. It displays its certificate finge
 
 The pairing-only TLS endpoint temporarily uses the configured listening port plus one (e.g. sync 45452, enrollment 45453). That port must be reachable; Rustboard does not alter firewalls. It accepts only identity/confirmation records, never clipboard/file requests. Closing the CLI normally cancels immediately; forced terminal loss closes the window within ten seconds. The total session expires after 120 seconds. TLS proves possession of each displayed certificate's private key; human fingerprint comparison authorizes the identity. No discovery or automatic trust-on-first-use is added.
 
-`rustboard unpair <IP>[:port]` removes the uniquely matching configured peer. Restart to revoke active trust. Unknown/ambiguous addresses fail. Addresses locate peers; certificate fingerprints remain their identities. Repeat mutual pairing after an address change. Interrupted saving may leave one side configured; inspect config or retry, and do not treat an incomplete result as success.
+`rustboard unpair <IP>` removes all configured peers at that IP, regardless of port. Restart to revoke active trust. Unknown addresses fail. Addresses locate peers; certificate fingerprints remain their identities. Repeat mutual pairing after an address change. Interrupted saving may leave one side configured; inspect config or retry, and do not treat an incomplete result as success.
 
 ## Daily commands
 
@@ -63,9 +63,8 @@ The pairing-only TLS endpoint temporarily uses the configured listening port plu
 - `start`: immediately starts the installed default service and enables login startup.
 - `stop`: immediately stops it and disables login startup, including launchd KeepAlive. It preserves identity/config/pairs.
 - `restart`: restarts an enabled service; a disabled service requires `start`.
-- `reload`: applies saved configuration through the same service restart, preserving login startup. It is not a live reload: active clipboard transfers and pairing sessions are interrupted. A disabled service requires `start`.
 - `config`: opens config with VISUAL/EDITOR (an executable path), otherwise Windows Notepad or the macOS default text editor. Save and manually restart.
-- `pair [IP[:port]]`, `unpair IP[:port]`, `--help`, `--version`.
+- `pair [IP[:port]]`, `unpair IP`, `help [COMMAND]`, `version`.
 
 There are no public pause/resume/mode/peers/doctor commands. Change mode in config. Pair requires a running Agent; config/status/unpair work with the Agent stopped. Service commands only target the installed default profile.
 
@@ -103,7 +102,7 @@ No folder recursion, native inline-image fidelity, automatic updates, public not
 ### macOS small-file eager download (optional)
 
 Add `"macos_eager_download": true` to the top level of `config.json`, then run
-`rustboard reload`. The default is false (also when omitted); Windows ignores this
+`rustboard restart`. The default is false (also when omitted); Windows ignores this
 macOS-only setting. Existing identity and peer entries stay unchanged.
 
 Files are always published immediately as File Provider URLs, with no body reads.
@@ -226,3 +225,13 @@ Files pasted into a destination folder have a separate lifetime: deleting them d
 not notify Rustboard to evict its File Provider cache. Successful fetch result files
 are handed to the system's File Provider storage management, not manually deleted
 behind the framework's back. The batch threshold is not a free-space guarantee.
+
+### Windows installation context
+
+Run Scoop or the installer from a normal user terminal. A child process of a
+packaged application such as Codex can inherit MSIX file and registry
+virtualization: installation may appear successful while config and login startup
+exist only in that application's private environment. Do not use such a terminal
+to accept a normal-user installation. Verify `rustboard status` and `rustboard
+config` from a separately opened PowerShell session. Rustboard does not search or
+migrate application-private configuration directories.

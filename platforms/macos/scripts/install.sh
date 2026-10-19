@@ -65,7 +65,7 @@ launchctl enable "gui/$(id -u)/org.rustboard.agent"
 launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.rustboard.agent.plist"
 for attempt in {1..150}; do
   if "$base/bin/rustboard" status --json 2>/dev/null; then
-    echo "CLI ready. Open a new terminal after direct installation. Configure listen/peers with rustboard config; apply with rustboard reload."
+    echo "CLI ready. Open a new terminal after direct installation. Configure listen/peers with rustboard config; apply with rustboard restart."
     echo "Permissions: see docs/INSTALLATION.md for manual System Settings instructions."
     exit 0
   fi

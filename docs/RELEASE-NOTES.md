@@ -21,6 +21,6 @@ scoop install myhades/rustboard
 
 Both installers are per-user and manage CLI links/PATH and login startup.
 Uninstall retains device identity, paired peers and configuration. Use
-`rustboard config`, `rustboard pair` and `rustboard reload` to configure a new
+`rustboard config`, `rustboard pair` and `rustboard restart` to configure a new
 installation. Permissions and manual Open Anyway instructions are in
 [INSTALLATION.md](https://github.com/myhades/rustboard/blob/main/docs/INSTALLATION.md).

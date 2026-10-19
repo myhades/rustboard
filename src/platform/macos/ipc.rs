@@ -196,9 +196,9 @@ impl Server {
             "pair-begin" | "pair-poll" | "pair-approve" | "pair-cancel" => {
                 return crate::app::pairing::control(node, &self.dir, &args);
             }
-            "unpair-address" => {
+            "unpair-ip" => {
                 ensure!(args.len() == 2, "address required");
-                crate::app::config::unpair_address(&self.dir, args[1].parse()?)?;
+                crate::app::config::unpair_ip(&self.dir, args[1].parse()?)?;
             }
             "stop" => node.stop.store(true, Ordering::Release),
             _ => anyhow::bail!("unknown command"),

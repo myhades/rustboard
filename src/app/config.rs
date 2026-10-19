@@ -174,16 +174,16 @@ pub fn status(node: &crate::core::transport::Node, dir: &Path) -> Result<Value> 
         json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"fingerprint":node.identity.pin(),"device_id":node.identity.device(),"mode":if node.engine.lock().unwrap().text_only{"text"}else{"all"},"listen":active.map(|v| &v["listen"]),"peers":*node.peers.lock().unwrap(),"pending_restart":active.is_some_and(|v|v!=&desired)}),
     )
 }
-pub fn unpair_address(dir: &Path, address: std::net::SocketAddr) -> Result<()> {
+pub fn unpair_ip(dir: &Path, address: std::net::IpAddr) -> Result<()> {
     let _guard = WRITE_LOCK.lock().unwrap();
     let _file_guard = file_lock(dir)?;
     let mut value = load(dir)?;
     let mut next = peers(&value)?;
     ensure!(
-        next.iter().filter(|p| p.address == address).count() == 1,
-        "address absent or ambiguous; inspect status/config"
+        next.iter().any(|p| p.address.ip() == address),
+        "no paired device at {address}; inspect status/config"
     );
-    next.retain(|p| p.address != address);
+    next.retain(|p| p.address.ip() != address);
     value["peers"] = serde_json::to_value(next)?;
     write(dir, &value)
 }
@@ -207,7 +207,7 @@ mod tests {
         };
         save_peer(&dir, &identity.pin(), peer.clone()).unwrap();
         assert_eq!(startup(&dir).unwrap().1.len(), 1);
-        unpair_address(&dir, peer.address).unwrap();
+        unpair_ip(&dir, peer.address.ip()).unwrap();
         assert!(startup(&dir).unwrap().1.is_empty());
         let mut broken = load(&dir).unwrap();
         broken["identity"]["private_key"]["blob"] = json!([1, 2, 3]);
@@ -221,6 +221,27 @@ mod tests {
 #[cfg(test)]
 mod validation_tests {
     use super::*;
+    #[test]
+    fn unpair_ip_removes_all_ports_and_preserves_other_devices() {
+        let dir = std::env::temp_dir().join(crate::core::engine::new_id());
+        std::fs::create_dir(&dir).unwrap();
+        let mut value = load(&dir).unwrap();
+        value["identity"] = json!({});
+        value["peers"] = json!([
+            {"address":"127.0.0.1:45452","fingerprint":"a".repeat(64)},
+            {"address":"127.0.0.1:45453","fingerprint":"b".repeat(64)},
+            {"address":"[::1]:45452","fingerprint":"c".repeat(64)}
+        ]);
+        write(&dir, &value).unwrap();
+        unpair_ip(&dir, "127.0.0.1".parse().unwrap()).unwrap();
+        let remaining = load(&dir).unwrap();
+        assert_eq!(remaining["peers"], json!([value["peers"][2]]));
+        assert!(unpair_ip(&dir, "127.0.0.1".parse().unwrap()).is_err());
+        assert_eq!(load(&dir).unwrap(), remaining);
+        unpair_ip(&dir, "::1".parse().unwrap()).unwrap();
+        assert!(load(&dir).unwrap()["peers"].as_array().unwrap().is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn malformed_settings_and_duplicate_peers_are_rejected() {
         let mut value =

@@ -25,4 +25,4 @@ security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.ke
 export SIGN_IDENTITY="$MACOS_SIGN_IDENTITY"
 bash platforms/macos/scripts/sign.sh
 # Verify launch of the signed CLI on a fresh runner. This is NOT GUI/File Provider acceptance.
-target/macos/bin/rustboard --help
+target/macos/bin/rustboard help

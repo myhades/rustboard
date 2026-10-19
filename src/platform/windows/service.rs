@@ -79,8 +79,8 @@ pub fn start(register: bool) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("invalid install path"))?,
     );
     c.stdin(Stdio::null())
-        .stdout(std::fs::File::create(base.join("agent.out.log"))?)
-        .stderr(std::fs::File::create(base.join("agent.err.log"))?)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()?;
     for _ in 0..50 {
         if crate::app::cli::request(&["status"]).is_ok() {
@@ -88,7 +88,9 @@ pub fn start(register: bool) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    anyhow::bail!("Agent did not start; inspect agent.err.log (login startup may remain enabled)")
+    anyhow::bail!(
+        "Agent did not start; inspect logs in the profile directory (login startup may remain enabled)"
+    )
 }
 pub fn stop(unregister: bool) -> Result<()> {
     let agent = base()?.join("bin/rustboardd.exe");

@@ -36,7 +36,7 @@ pub fn load(dir: &Path) -> Result<Value> {
     let value = if path.exists() {
         read_json(&path)?
     } else {
-        json!({"schema":2,"listen":"0.0.0.0:45452","mode":"all","macos_eager_download":false,"peers":[],"identity":null})
+        json!({"listen":"0.0.0.0:45452","mode":"all","macos_eager_download":false,"peers":[],"identity":null})
     };
     validate(&value)?;
     Ok(value)
@@ -47,7 +47,6 @@ fn validate(value: &Value) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("config must be an object"))?;
     ensure!(
         object.keys().all(|k| [
-            "schema",
             "listen",
             "mode",
             "peers",
@@ -68,8 +67,8 @@ fn validate(value: &Value) -> Result<()> {
             .parse()?;
     }
     ensure!(
-        value["schema"] == 2 && object.contains_key("identity") && value["peers"].is_array(),
-        "expected current schema-2 config"
+        object.contains_key("identity") && value["peers"].is_array(),
+        "config requires identity and a peers array"
     );
     ensure!(
         value["identity"].is_object()
@@ -96,6 +95,24 @@ fn peers(value: &Value) -> Result<Vec<Peer>> {
     }
     Ok(peers)
 }
+fn serialize(value: &Value) -> Result<Vec<u8>> {
+    #[derive(serde::Serialize)]
+    struct Fields<'a> {
+        listen: &'a Value,
+        mode: &'a Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        macos_eager_download: Option<&'a Value>,
+        peers: &'a Value,
+        identity: &'a Value,
+    }
+    Ok(serde_json::to_vec_pretty(&Fields {
+        listen: &value["listen"],
+        mode: &value["mode"],
+        macos_eager_download: value.get("macos_eager_download"),
+        peers: &value["peers"],
+        identity: &value["identity"],
+    })?)
+}
 fn write(dir: &Path, value: &Value) -> Result<()> {
     validate(value)?;
     let temporary = dir.join(format!("config-{}.tmp", crate::core::engine::new_id()));
@@ -108,7 +125,7 @@ fn write(dir: &Path, value: &Value) -> Result<()> {
             options.mode(0o600);
         }
         let mut file = options.open(&temporary)?;
-        file.write_all(&serde_json::to_vec_pretty(value)?)?;
+        file.write_all(&serialize(value)?)?;
         file.sync_all()?;
         drop(file);
         std::fs::rename(&temporary, dir.join("config.json"))?;
@@ -166,7 +183,7 @@ pub fn save_peer(dir: &Path, own_pin: &str, peer: Peer) -> Result<()> {
     let mut value = load(dir)?;
     ensure!(peer.fingerprint != own_pin, "cannot pair self");
     let mut next = peers(&value)?;
-    next.retain(|p| p.fingerprint != peer.fingerprint);
+    next.retain(|p| p.fingerprint != peer.fingerprint && p.address != peer.address);
     next.push(peer);
     value["peers"] = serde_json::to_value(next)?;
     write(dir, &value)
@@ -256,9 +273,51 @@ mod validation_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
+    fn config_output_keeps_settings_before_peers_and_identity() {
+        let dir = std::env::temp_dir().join(crate::core::engine::new_id());
+        let value = load(&dir).unwrap();
+        let bytes = serialize(&value).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), value);
+        let text = String::from_utf8(bytes).unwrap();
+        let positions: Vec<_> = [
+            "listen",
+            "mode",
+            "macos_eager_download",
+            "peers",
+            "identity",
+        ]
+        .iter()
+        .map(|key| text.find(&format!("\"{key}\"")).unwrap())
+        .collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+    #[test]
+    fn pairing_replaces_the_same_address_with_a_new_fingerprint() {
+        let dir = std::env::temp_dir().join(crate::core::engine::new_id());
+        std::fs::create_dir(&dir).unwrap();
+        let mut value = load(&dir).unwrap();
+        value["identity"] = json!({});
+        write(&dir, &value).unwrap();
+        let address = "127.0.0.1:45452".parse().unwrap();
+        for fingerprint in ["b".repeat(64), "c".repeat(64)] {
+            save_peer(
+                &dir,
+                &"a".repeat(64),
+                Peer {
+                    address,
+                    fingerprint,
+                },
+            )
+            .unwrap();
+        }
+        let saved = load(&dir).unwrap();
+        assert_eq!(saved["peers"].as_array().unwrap().len(), 1);
+        assert_eq!(saved["peers"][0]["fingerprint"], "c".repeat(64));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
     fn malformed_settings_and_duplicate_peers_are_rejected() {
-        let mut value =
-            json!({"schema":2,"listen":"127.0.0.1:45451","mode":"all","peers":[],"identity":{}});
+        let mut value = json!({"listen":"127.0.0.1:45451","mode":"all","peers":[],"identity":{}});
         validate(&value).unwrap();
         value["macos_eager_download"] = true.into();
         validate(&value).unwrap();
@@ -269,9 +328,6 @@ mod validation_tests {
         value["listen"] = "not-an-address".into();
         assert!(validate(&value).is_err());
         value["listen"] = Value::Null;
-        value["schema"] = 1.into();
-        assert!(validate(&value).is_err());
-        value["schema"] = 2.into();
         let peer = json!({"address":"127.0.0.1:45452","fingerprint":"a".repeat(64)});
         value["peers"] = json!([peer.clone(), peer]);
         assert!(validate(&value).is_err());

@@ -23,8 +23,8 @@ Rust diagnostic executables live in tools/rust, declared as Cargo examples so th
 
 ## Contributing
 
-Create a branch and open a pull request against main. Required checks must pass
-before merging. Ordinary pushes do not run CI. Release publication runs tests and
+Ordinary pushes do not run CI. Pull requests run checks before merging.
+Release publication runs tests and
 builds the distribution archives.
 
 ## Test scope

@@ -2,7 +2,7 @@
 
 Pull requests targeting main run tests, formatting and clippy on Windows, both
 macOS architectures and portable Linux code. Branch pushes do not start CI.
-Main requires a pull request and passing checks. Release publication runs tests,
+Release publication runs tests,
 builds, signing and packaging on GitHub-hosted runners.
 
 macOS builds use Apple Development signing without notarization.

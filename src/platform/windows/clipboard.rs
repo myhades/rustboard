@@ -123,7 +123,7 @@ pub fn capture(window: HWND) -> anyhow::Result<Captured> {
         match super::image_file::capture() {
             Ok(Some(image)) => return Ok(Captured::Image(image)),
             Err(_) => {
-                eprintln!("clipboard image rejected: unsupported or larger than 64 MiB");
+                log::warn!(target: "clipboard", "clipboard image rejected: unsupported or larger than 64 MiB");
                 return Ok(Captured::Unsupported);
             }
             Ok(None) => {}
@@ -180,7 +180,7 @@ fn update(window: HWND) {
                             );
                         }
                     });
-                    eprintln!("clipboard text event bytes={}", text.len());
+                    log::debug!(target: "clipboard", "text captured bytes={}", text.len());
                 }
                 Captured::Files(paths) => {
                     STATE.with_borrow(|s| {
@@ -188,7 +188,7 @@ fn update(window: HWND) {
                             let mut engine = node.engine.lock().unwrap();
                             if super::local_files::offer(&mut engine, paths.clone()).is_err() {
                                 engine.clear_clipboard();
-                                eprintln!("clipboard file offer rejected");
+                                log::warn!(target: "clipboard", "clipboard file offer rejected");
                             }
                         }
                     });
@@ -206,9 +206,9 @@ fn update(window: HWND) {
                                 .and_then(|path| crate::app::image_file::offer(&mut engine, path));
                             if result.is_err() {
                                 engine.clear_clipboard();
-                                eprintln!("clipboard image-to-file rejected");
+                                log::warn!(target: "clipboard", "clipboard image-to-file rejected");
                             } else {
-                                eprintln!("clipboard image published as ordinary file");
+                                log::debug!(target: "clipboard", "image published as file");
                             }
                         }
                     });
@@ -271,6 +271,7 @@ pub fn run() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let dir = super::ipc::prepare_dir()?;
     let ipc = super::ipc::Server::bind(dir.clone())?;
+    crate::app::logging::init(&dir)?;
     let images = dir.join("images");
     crate::app::image_file::prepare(&images)?;
     STATE.with_borrow_mut(|s| s.images = images);
@@ -337,6 +338,7 @@ pub fn run() -> anyhow::Result<()> {
         AddClipboardFormatListener(window)?;
         SetTimer(Some(window), 1, 500, None);
     }
+    log::info!(target: "agent", "started");
     let mut msg = MSG::default();
     loop {
         let result = unsafe { GetMessageW(&mut msg, None, 0, 0) }.0;
@@ -429,7 +431,7 @@ fn tick(window: HWND) {
             Ok(())
         })();
         if result.is_err() {
-            eprintln!("clipboard publication failed");
+            log::warn!(target: "clipboard", "clipboard publication failed");
         }
     }
 }

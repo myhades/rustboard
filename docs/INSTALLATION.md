@@ -86,7 +86,7 @@ There are no public pause/resume/mode/peers/doctor commands. Change mode in conf
 Windows default profile: `%LOCALAPPDATA%/Rustboard/default/`.
 Mac default profile: signed App Group container's `default/` directory, normally `~/Library/Group Containers/<TEAM>.org.rustboard.shared/default/`.
 
-Runtime fields in `config.json` (the full generated schema-2 file also contains `schema`, `peers`, and the managed `identity` block; do not replace the full file with this excerpt):
+Editable settings in `config.json` (excerpt):
 
 ```json
 {"listen":"192.168.100.6:45451","mode":"all"}
@@ -96,15 +96,20 @@ Use the machine's own address/port. CLI `--listen` on the Agent overrides the fi
 
 Configuration edits, pairing and unpairing are saved for the next startup, without live reload. `status` reports pending changes. Run `rustboard restart` after editing. Package restart scripts are wrappers for that command. To immediately revoke access, use `stop` (also disables login startup); a later `start` loads the saved config.
 
-The profile now has ONE editable `config.json` (schema 2), containing `listen`, `mode`, `peers` and `identity`. `peers` is an array of `{ "address": "IP:port", "fingerprint": "64 lowercase SHA-256 hex characters" }`. `identity.certificate_der` contains the public certificate bytes. Keep the automatically managed `identity` section intact.
+`peers` is an array of `{ "address": "IP:port", "fingerprint": "64 lowercase SHA-256 hex characters" }`. `identity.certificate_der` contains the public certificate bytes. Keep the automatically managed `identity` section intact.
 
-Windows: `identity.private_key` contains `provider: "windows-dpapi"` and an opaque `blob` byte array, encrypted with current-user DPAPI (not machine-wide scope). macOS: it contains `provider: "macos-keychain"` and `account`, referencing the non-synchronizing login Keychain item under service `org.rustboard.device-identity`. The Agent's signed identity controls Keychain access; this is independent of the developer's signing key. No custom cryptography is implemented. DPAPI is a current-user boundary, not protection against arbitrary malicious code already running as that user.
+Windows: `identity.private_key` contains `provider: "windows-dpapi"` and an opaque base64 `blob`, encrypted with current-user DPAPI (not machine-wide scope). macOS: it contains `provider: "macos-keychain"` and `account`, referencing the non-synchronizing login Keychain item under service `org.rustboard.device-identity`. The Agent's signed identity controls Keychain access; this is independent of the developer's signing key. No custom cryptography is implemented. DPAPI is a current-user boundary, not protection against arbitrary malicious code already running as that user.
 
-Only current schema-2 config is accepted. A fresh installation initializes an explicit empty identity and empty peer list using the native credential store. Existing protected identity and peers are loaded unchanged. Old config, identity/peer files and cache formats are not imported, converted or cleaned up. Credential failures abort startup without replacement identity generation or plaintext fallback.
 
 A config copy alone is not a portable identity backup: Windows DPAPI recovery needs the corresponding Windows credentials/environment, and Mac needs its Keychain item. Missing/locked credentials cause startup failure; unlock the login Keychain and retry, or explicitly establish a new identity and re-pair. Uninstall retains config and Keychain identity. `clock.json`, locks, sockets and temporary data are runtime state, not additional user configuration.
 
-Windows logs: `%LOCALAPPDATA%/Rustboard/agent.err.log` for installer-started process. macOS logs: `~/Library/Application Support/Rustboard/agent.err.log`; File Provider stages also appear in unified logging under `org.rustboard`. Windows login Run currently has no redirected console log; use CLI status and a manual diagnostic run when troubleshooting.
+Agent logs are stored in `logs/` under the profile directory on both platforms.
+`agent_rCURRENT.log` is the active file; rotation keeps two historical files, each
+with a 2 MiB threshold. Restarts append to the active log. Lines contain local time
+with timezone and milliseconds, level, component and message. The default level is
+INFO; set `RUSTBOARD_LOG=debug` in the Agent environment for diagnostic detail.
+File Provider logs use the macOS system log, subsystem `org.rustboard`.
+
 
 ## Validation and limits
 

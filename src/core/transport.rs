@@ -92,10 +92,39 @@ impl Node {
                         let n = node.clone();
                         std::thread::spawn(move || {
                             if let Err(e) = n.session(socket) {
-                                #[cfg(test)]
-                                eprintln!("session failure: {e:?}");
-                                #[cfg(not(test))]
-                                let _ = e;
+                                let closed = e
+                                    .chain()
+                                    .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+                                    .is_some_and(|error| {
+                                        matches!(
+                                            error.kind(),
+                                            std::io::ErrorKind::UnexpectedEof
+                                                | std::io::ErrorKind::ConnectionReset
+                                                | std::io::ErrorKind::ConnectionAborted
+                                                | std::io::ErrorKind::TimedOut
+                                                | std::io::ErrorKind::WouldBlock
+                                        )
+                                    });
+                                if closed {
+                                    log::debug!(target: "network", "session closed: {}", network_error(&e));
+                                } else {
+                                    static LAST_WARNING: std::sync::atomic::AtomicU64 =
+                                        std::sync::atomic::AtomicU64::new(0);
+                                    let now = crate::core::engine::now_ms();
+                                    let last = LAST_WARNING.load(Ordering::Relaxed);
+                                    if now.saturating_sub(last) >= 60_000
+                                        && LAST_WARNING
+                                            .compare_exchange(
+                                                last,
+                                                now,
+                                                Ordering::Relaxed,
+                                                Ordering::Relaxed,
+                                            )
+                                            .is_ok()
+                                    {
+                                        log::warn!(target: "network", "session failed: {}", network_error(&e));
+                                    }
+                                }
                             }
                             n.active.fetch_sub(1, Ordering::AcqRel);
                         });
@@ -348,13 +377,30 @@ impl Node {
     pub fn start_sync(self: &Arc<Self>) {
         let node = self.clone();
         std::thread::spawn(move || {
+            let mut failures = std::collections::HashMap::<SocketAddr, Instant>::new();
             while !node.stop.load(Ordering::Acquire) {
                 let peers = node.peers.lock().unwrap().clone();
+                failures.retain(|address, _| peers.iter().any(|p| p.address == *address));
                 for peer in peers {
                     if node.stop.load(Ordering::Acquire) {
                         break;
                     }
-                    let _ = node.sync_once(&peer);
+                    match node.sync_once(&peer) {
+                        Ok(()) => {
+                            if failures.remove(&peer.address).is_some() {
+                                log::info!(target: "network", "peer {} reconnected", peer.address);
+                            }
+                        }
+                        Err(error) => {
+                            if failures
+                                .get(&peer.address)
+                                .is_none_or(|last| last.elapsed() >= Duration::from_secs(60))
+                            {
+                                log::warn!(target: "network", "peer {} sync failed: {}", peer.address, network_error(&error));
+                                failures.insert(peer.address, Instant::now());
+                            }
+                        }
+                    }
                 }
                 std::thread::sleep(Duration::from_secs(1));
             }
@@ -378,3 +424,16 @@ mod transfer;
 pub use transfer::RemoteSource;
 pub(crate) use transfer::SharedBatchRead;
 use transfer::{ReadConnection, SharedConnection};
+
+// Do not put a remote message's JSON values into diagnostic output.
+fn network_error(error: &anyhow::Error) -> String {
+    for cause in error.chain() {
+        if let Some(error) = cause.downcast_ref::<std::io::Error>() {
+            return error.to_string();
+        }
+        if let Some(error) = cause.downcast_ref::<rustls::Error>() {
+            return error.to_string();
+        }
+    }
+    "invalid protocol message or peer identity".into()
+}

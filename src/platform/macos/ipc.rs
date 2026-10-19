@@ -167,7 +167,7 @@ impl Server {
                                     op => node.local_ipc_session_reply(op, retained.clone()),
                                 }
                             })().unwrap_or_else(|error| {
-                                eprintln!("IPC request failed: {error:#}");
+                                log::warn!(target: "ipc", "request failed: {error:#}");
                                 IpcReply::Other(serde_json::json!({"ok":false,"protocol":1,"code":"io","error":"request failed"}))
                             });
                             crate::core::transport::write_ipc_reply(&mut stream, &reply)?;

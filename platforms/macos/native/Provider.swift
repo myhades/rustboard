@@ -92,7 +92,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     }
     func fetchContents(for identifier:NSFileProviderItemIdentifier,version requestedVersion:NSFileProviderItemVersion?,request:NSFileProviderRequest,completionHandler:@escaping(URL?,NSFileProviderItem?,Error?)->Void)->Progress {
         let progress=Progress(totalUnitCount:0)
-        log.notice("fetch_start background=\(request.isSystemRequest)")
+        log.debug("fetch_start background=\(request.isSystemRequest)")
         DispatchQueue.global().async {
             while fetchSlots.wait(timeout:.now()+0.1) != .success {
                 if progress.isCancelled {completionHandler(nil,nil,CocoaError(.userCancelled));return}
@@ -108,7 +108,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 stage = "temporary_directory"
                 let directory = try manager.temporaryDirectoryURL()
                 let removed = try cleanupPending(in: directory)
-                if removed > 0 {log.notice("stale_pending_removed count=\(removed)")}
+                if removed > 0 {log.debug("stale_pending_removed count=\(removed)")}
                 let pending = directory.appendingPathComponent("rb-pending-" + UUID().uuidString)
                 let url = directory.appendingPathComponent("rb-ready-" + UUID().uuidString)
                 stage = "authenticated_ipc"
@@ -117,7 +117,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 stage = "hydrate"
                 try hydrate(offer,file,to:pending,progress:progress,background:request.isSystemRequest,call: session.call,commit: {try FileManager.default.moveItem(at: $0, to: url)})
                 guard !progress.isCancelled else {try? FileManager.default.removeItem(at:url);throw WireError.cancelled}
-                log.notice("fetch_complete bytes=\(size)")
+                log.debug("fetch_complete bytes=\(size)")
                 completionHandler(url,item,nil)
             } catch {
                 // Log only the stage and typed error code, never paths or file content.

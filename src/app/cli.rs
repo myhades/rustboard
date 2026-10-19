@@ -3,7 +3,7 @@
 use crate::platform::macos::{ipc, service};
 #[cfg(windows)]
 use crate::platform::windows::{ipc, service};
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use serde_json::Value;
 use std::{
     io::{self, Write},
@@ -144,12 +144,12 @@ Synchronize the clipboard between paired computers.
 Usage: rustboard COMMAND [ARGUMENTS]
 
 Commands:
-  status [--json]     Show service state and paired devices
+  status [--json]     Show service state and peers
   start               Start the service and enable login startup
   stop                Stop the service and disable login startup
   restart             Restart the service and apply saved configuration
   config              Open the configuration in your text editor
-  pair [IP[:PORT]]    Wait for pairing or connect to a device (default port: 45452)
+  pair [IP[:PORT]]    Wait for pairing or connect to a peer (default port: 45452)
   unpair IP           Remove pairing for an IP address
   help [COMMAND]      Show help for all commands or a specific command
   version             Show the installed CLI version
@@ -160,11 +160,11 @@ Run 'rustboard help COMMAND' for command details."
     };
     let detail = match command {
         "status" => {
-            "status [--json]\n\nShow service state, listen address, mode and paired devices.\nPeer entries show saved trust, not connection status.\nWith --json, print the Agent response; fail if the Agent is unavailable."
+            "status [--json]\n\nShow service state, listen address, mode and peers.\nPeer entries show saved trust, not connection status.\nWith --json, print the Agent response; fail if the Agent is unavailable."
         }
         "start" => "start\n\nStart the service now and enable automatic startup at login.",
         "stop" => {
-            "stop\n\nStop the service now and disable automatic startup at login.\nKeep configuration, device identity and paired devices."
+            "stop\n\nStop the service now and disable automatic startup at login.\nKeep configuration, device identity and peers."
         }
         "restart" => {
             "restart\n\nRestart the service to apply configuration and pairing changes.\nActive transfers are interrupted. A disabled service requires 'rustboard start'."
@@ -173,7 +173,7 @@ Run 'rustboard help COMMAND' for command details."
             "config\n\nOpen the existing configuration using VISUAL, then EDITOR, or the system\ntext editor. VISUAL and EDITOR must name an executable.\nSave your changes, then run 'rustboard restart' to apply them."
         }
         "pair" => {
-            "pair [IP[:PORT]]\n\nWithout an address, wait for an incoming pairing request. With an address,\nconnect to that device; the default port is 45452. Use [IPv6]:PORT for IPv6\nwith an explicit port. Compare fingerprints on both devices before accepting.\nBoth services must be running. Each service restarts after pairing succeeds."
+            "pair [IP[:PORT]]\n\nWithout an address, wait for an incoming pairing request. With an address,\nconnect to that peer; the default port is 45452. Use [IPv6]:PORT for IPv6\nwith an explicit port. Compare fingerprints on both peers before accepting.\nBoth services must be running. Each service restarts after pairing succeeds."
         }
         "unpair" => {
             "unpair IP\n\nRemove all saved pairings at the specified IPv4 or IPv6 address. Do not\ninclude a port. Restart the service to revoke existing trust.\nTo revoke access immediately, stop the service before removing the pairing."
@@ -187,7 +187,7 @@ Run 'rustboard help COMMAND' for command details."
 }
 fn print_peers(peers: &Value) {
     let peers = peers.as_array();
-    println!("\nPaired devices ({})", peers.map_or(0, Vec::len));
+    println!("\nPeers ({})", peers.map_or(0, Vec::len));
     if let Some(peers) = peers.filter(|p| !p.is_empty()) {
         let width = peers
             .iter()
@@ -208,10 +208,7 @@ fn print_peers(peers: &Value) {
     }
 }
 fn pair(target: Option<&str>) -> Result<()> {
-    ensure!(
-        request(&["status"]).is_ok(),
-        "Service is not running. Run 'rustboard start' first."
-    );
+    ensure!(request(&["status"]).is_ok(), "not running");
     let target = target.map(address).transpose()?.map(|a| a.to_string());
     let v = if let Some(a) = &target {
         request(&["pair-begin", a])?
@@ -230,7 +227,7 @@ fn pair(target: Option<&str>) -> Result<()> {
     }
     let _guard = Cancel(id.clone());
     println!(
-        "Local fingerprint:\n  {}\nWaiting for pairing...",
+        "Local fingerprint:\n  {}\nWaiting...",
         group(v["fingerprint"].as_str().unwrap_or(""))
     );
     let (tx, rx) = std::sync::mpsc::channel();
@@ -244,7 +241,25 @@ fn pair(target: Option<&str>) -> Result<()> {
                     v["peer"].as_str().unwrap_or("?"),
                     group(v["fingerprint"].as_str().unwrap_or(""))
                 );
-                print!("Compare fingerprints on BOTH devices. Accept? [Y/n] ");
+                let peer: SocketAddr = v["peer"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("missing peer address"))?
+                    .parse()?;
+                let config = crate::app::config::load(&ipc::data_dir()?)?;
+                if config["peers"].as_array().is_some_and(|peers| {
+                    peers.iter().any(|p| {
+                        p["address"]
+                            .as_str()
+                            .and_then(|a| a.parse::<SocketAddr>().ok())
+                            == Some(peer)
+                    })
+                }) {
+                    println!(
+                        "rustboard: peer \"{}\" already exists and will be updated",
+                        peer.ip()
+                    );
+                }
+                print!("Compare fingerprints on both peers. Accept? [y/N] ");
                 io::stdout().flush()?;
                 let tx = tx.clone();
                 std::thread::spawn(move || {
@@ -256,11 +271,7 @@ fn pair(target: Option<&str>) -> Result<()> {
             "saved" => {
                 println!("Peer added. Restarting service...");
                 drop(_guard);
-                service::stop(false)
-                    .and_then(|_| service::start(false))
-                    .context(
-                        "Peer was saved, but service restart failed; run 'rustboard restart'",
-                    )?;
+                service::stop(false).and_then(|_| service::start(false))?;
                 return Ok(());
             }
             "failed" => anyhow::bail!("{}", v["error"].as_str().unwrap_or("pairing failed")),
@@ -269,7 +280,7 @@ fn pair(target: Option<&str>) -> Result<()> {
         if let Ok(ok) = rx.try_recv() {
             ensure!(ok, "pairing declined");
             request(&["pair-approve", &id])?;
-            println!("Waiting for peer...");
+            println!("Confirm on the other peer...");
         }
         std::thread::sleep(Duration::from_millis(300));
     }
@@ -281,18 +292,18 @@ fn accept_pairing(reader: &mut impl io::BufRead) -> bool {
         return false;
     }
     let answer = line.trim();
-    answer.is_empty() || answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
+    answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")
 }
 
 #[cfg(test)]
 mod tests {
     use super::accept_pairing;
     #[test]
-    fn pairing_defaults_to_yes_but_eof_and_declines_are_not_approval() {
-        for input in ["\n", "\r\n", "y\n", "YES\n"] {
+    fn pairing_requires_explicit_approval() {
+        for input in ["y\n", "YES\n"] {
             assert!(accept_pairing(&mut input.as_bytes()));
         }
-        for input in ["", "n\n", "no\n", "invalid\n"] {
+        for input in ["", "\n", "\r\n", "n\n", "no\n", "invalid\n"] {
             assert!(!accept_pairing(&mut input.as_bytes()));
         }
     }

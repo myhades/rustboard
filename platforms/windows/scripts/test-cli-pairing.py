@@ -12,26 +12,26 @@ def result(p):
 def peers(i):return json.loads((profiles[i][2]/'config.json').read_text())['peers']
 try:
  for i,port in enumerate([48920,48924]):
-  name='cli-'+uuid.uuid4().hex[:12];env=dict(os.environ,RUSTBOARD_PROFILE=name);path=pathlib.Path(env['LOCALAPPDATA'])/'Rustboard'/name;path.mkdir();profiles.append((port,env,path));(path/'config.json').write_text(json.dumps({'schema':2,'identity':None,'peers':[],'listen':f'127.0.0.1:{port}','mode':'text'}));agents.append(subprocess.Popen([str(agent)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
+  name='cli-'+uuid.uuid4().hex[:12];env=dict(os.environ,RUSTBOARD_PROFILE=name);path=pathlib.Path(env['LOCALAPPDATA'])/'Rustboard'/name;path.mkdir();profiles.append((port,env,path));(path/'config.json').write_text(json.dumps({'identity':None,'peers':[],'listen':f'127.0.0.1:{port}','mode':'text'}));agents.append(subprocess.Popen([str(agent)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
   for _ in range(50):
    r=run(i,'status','--json')
    if r.returncode==0:break
    time.sleep(.1)
   assert r.returncode==0,r.stderr
  # Decline must not persist on either side.
- a=start_pair(0,answer='n');time.sleep(.7);b=start_pair(1,'127.0.0.1:48920');ra=result(a);rb=result(b)
+ a=start_pair(0,answer='');time.sleep(.7);b=start_pair(1,'127.0.0.1:48920');ra=result(a);rb=result(b)
  assert ra[0]!=0 and rb[0]!=0 and not peers(0) and not peers(1)
  time.sleep(.7)
  # Both confirm and save; active peers remain unchanged until restart.
  a=start_pair(0);time.sleep(.7);b=start_pair(1,'127.0.0.1:48920');ra=result(a);rb=result(b)
- assert ra[0]==0 and rb[0]==0
+ assert all(code!=0 and 'Peer added. Restarting service...' in out and 'service commands target installed default profile only' in out for code,out in [ra,rb])
  for i in range(2):
   assert len(peers(i))==1
   active=json.loads(run(i,'status','--json').stdout);assert active['peers']==[] and active['pending_restart']
  # Address-based unpair, unknown address rejected.
- assert run(0,'unpair','127.0.0.1:48924').returncode==0
+ assert run(0,'unpair','127.0.0.1').returncode==0
  assert not peers(0)
- assert run(0,'unpair','127.0.0.1:48924').returncode!=0
+ assert run(0,'unpair','127.0.0.1').returncode!=0
  time.sleep(.7)
  # Abrupt terminal exit closes listening window through heartbeat expiry.
  a=start_pair(0);time.sleep(.7);a.terminate();a.wait(timeout=5);time.sleep(11)

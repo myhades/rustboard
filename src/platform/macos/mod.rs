@@ -103,7 +103,7 @@ fn host_command(args: &[&str]) -> Result<std::process::Output> {
     let out = std::process::Command::new(host).args(args).output()?;
     if !out.status.success() {
         // The host emits stage/domain/numeric codes only, never clipboard bodies.
-        eprintln!(
+        log::warn!(target: "clipboard",
             "File Provider: {}",
             String::from_utf8_lossy(&out.stderr).trim()
         );
@@ -132,7 +132,7 @@ impl Drop for Cleanup {
             rb_clear_owned();
         }
         if host_command(&["reset"]).is_err() {
-            eprintln!("File Provider cleanup incomplete; retry at next startup");
+            log::warn!(target: "clipboard", "File Provider cleanup incomplete; retry at next startup");
         }
     }
 }
@@ -152,6 +152,7 @@ pub fn run() -> Result<()> {
     let dir = ipc::data_dir()?;
     ipc::protect_dir(&dir)?;
     let server = ipc::Server::bind(dir.clone())?;
+    crate::app::logging::init(&dir)?;
     let images = dir.join("images");
     ipc::protect_dir(&images)?;
     crate::app::image_file::prepare(&images)?;
@@ -192,6 +193,7 @@ pub fn run() -> Result<()> {
     }
     server.spawn(node.clone());
     node.start_sync();
+    log::info!(target: "agent", "started");
     let mut backend = MacBackend { node: node.clone() };
     let mut presented: Option<String> = None;
     let mut pending: Option<Prefetch> = None;
@@ -242,12 +244,12 @@ pub fn run() -> Result<()> {
             };
             if result.is_err() {
                 engine.clear_clipboard();
-                eprintln!("clipboard capture rejected");
+                log::warn!(target: "clipboard", "clipboard capture rejected");
             } else {
                 if value["kind"] == "image" {
-                    eprintln!("clipboard image published as ordinary file");
+                    log::debug!(target: "clipboard", "clipboard image published as ordinary file");
                 } else {
-                    eprintln!("local offer published content_bytes_read=0");
+                    log::debug!(target: "clipboard", "local offer published content_bytes_read=0");
                 }
             }
         }
@@ -285,7 +287,7 @@ pub fn run() -> Result<()> {
             } else if let Some(status) = task.child.try_wait()? {
                 pending = None;
                 if !status.success() {
-                    eprintln!("background prefetch failed; files remain available on demand");
+                    log::warn!(target: "clipboard", "background prefetch failed; files remain available on demand");
                 }
             }
         }
@@ -298,14 +300,14 @@ pub fn run() -> Result<()> {
             match &offer.content {
                 Content::Text { text } => {
                     backend.publish_text(text)?;
-                    eprintln!("native text publication complete");
+                    log::debug!(target: "clipboard", "native text publication complete");
                 }
                 Content::Files { .. } => {
                     if backend.publish_files(&offer).is_err() {
-                        eprintln!("file publication failed");
+                        log::warn!(target: "clipboard", "file publication failed");
                     } else {
                         presented = Some(offer.offer_id.clone());
-                        eprintln!("native file publication complete");
+                        log::debug!(target: "clipboard", "native file publication complete");
                         if eager_download {
                             pending = None;
                             let host = std::env::var_os("RUSTBOARD_HOST")
@@ -313,6 +315,7 @@ pub fn run() -> Result<()> {
                             match std::process::Command::new(host)
                                 .args(["prefetch", &offer.offer_id])
                                 .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
                                 .spawn()
                             {
                                 Ok(child) => {
@@ -321,7 +324,9 @@ pub fn run() -> Result<()> {
                                         offer_id: offer.offer_id.clone(),
                                     })
                                 }
-                                Err(_) => eprintln!("background prefetch host unavailable"),
+                                Err(_) => {
+                                    log::warn!(target: "clipboard", "background prefetch host unavailable")
+                                }
                             }
                         }
                     }

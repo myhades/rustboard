@@ -34,7 +34,7 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
         let config = crate::app::config::load(dir)?;
         let own: SocketAddr = config["listen"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Listening is disabled. Set listen to 0.0.0.0:45452 in rustboard config, then run rustboard restart."))?
+            .ok_or_else(|| anyhow::anyhow!("listening disabled"))?
             .parse()?;
         let remote = if args.len() == 2 {
             Some(args[1].parse::<SocketAddr>()?)
@@ -123,7 +123,7 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                 ensure!(port > 0, "invalid advertised port");
                 let peer = SocketAddr::new(ip, port);
                 if let Some(expected) = remote {
-                    ensure!(peer == expected, "peer listen address changed");
+                    ensure!(peer == expected, "peer port mismatch");
                 }
                 ensure!(ch.pin != node.identity.pin(), "cannot pair self");
                 {
@@ -157,10 +157,7 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                 )?;
                 // Both persist before reporting completion. Disconnect may leave one side saved; retry is idempotent.
                 ch.send(2)?;
-                ensure!(
-                    ch.receive()? == 2,
-                    "peer did not acknowledge saving; pairing incomplete, retry"
-                );
+                ensure!(ch.receive()? == 2, "peer declined pairing");
                 Ok(())
             };
             let result = run();
@@ -168,7 +165,7 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
             s.done = true;
             s.phase = if result.is_ok() { "saved" } else { "failed" }.into();
             if let Err(e) = result {
-                s.error = format!("{e}; pairing may be partially saved; inspect config or retry");
+                s.error = e.to_string();
             }
             s.socket = None;
         });

@@ -107,7 +107,7 @@ pub fn start(register: bool) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    anyhow::bail!("Agent did not start; inspect agent.err.log")
+    anyhow::bail!("Agent did not start; inspect logs in the profile directory")
 }
 pub fn stop(unregister: bool) -> Result<()> {
     plist()?;

@@ -47,7 +47,12 @@ enabled=true
 if launchctl print-disabled "gui/$(id -u)" | grep -Eq '"org.rustboard.agent" => (true|disabled)'; then enabled=false; fi
 launchctl bootout "gui/$(id -u)/org.rustboard.agent" 2>/dev/null || true
 /usr/bin/ditto "$out/Rustboard.app" "$app"
-cp "$out/bin/rustboardd" "$out/bin/rustboard" "$base/bin/"
+# Replacing an inode avoids stale executable signature pages after an upgrade.
+for name in rustboardd rustboard; do
+  temporary=$(mktemp "$base/bin/.$name.XXXXXX")
+  if ! cp -p "$out/bin/$name" "$temporary"; then rm -f "$temporary"; exit 1; fi
+  mv -f "$temporary" "$base/bin/$name"
+done
 /usr/bin/pluginkit -a "$app/Contents/PlugIns/RustboardProvider.appex"
 if ! "$app/Contents/MacOS/Rustboard" register; then
   echo "Registration failed. Check System Settings > Privacy & Security for an Open Anyway prompt, then retry." >&2
@@ -58,7 +63,7 @@ python3 platforms/macos/scripts/launchd.py "$base" "$app" "$HOME/Library/LaunchA
 if ! $enabled; then echo 'Updated; service remains disabled. Use rustboard start to enable.'; exit 0; fi
 launchctl enable "gui/$(id -u)/org.rustboard.agent"
 launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.rustboard.agent.plist"
-for attempt in {1..50}; do
+for attempt in {1..150}; do
   if "$base/bin/rustboard" status --json 2>/dev/null; then
     echo "CLI ready. Open a new terminal after direct installation. Configure listen/peers with rustboard config; apply with rustboard reload."
     echo "Permissions: see docs/INSTALLATION.md for manual System Settings instructions."

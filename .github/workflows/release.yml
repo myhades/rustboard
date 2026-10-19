@@ -32,6 +32,7 @@ jobs:
         shell: bash
         run: python -c 'import os,tomllib; assert os.environ["RELEASE_TAG"] == "v"+tomllib.load(open("Cargo.toml","rb"))["package"]["version"]'
       - run: cargo fmt --all -- --check
+      - run: python scripts/check-vectors.py
       - run: cargo test --all-targets --locked
       - run: cargo clippy --all-targets --locked -- -D warnings
       - if: runner.os == 'Windows'
@@ -106,6 +107,8 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      pull-requests: write
+      actions: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -114,7 +117,10 @@ jobs:
         with:
           name: package-manifests
           path: generated-manifests
-      - name: Commit both package manifests to main
+      - name: Propose package manifest update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           mkdir -p Casks bucket
           cp generated-manifests/Casks/rustboard.rb Casks/rustboard.rb
@@ -122,4 +128,8 @@ jobs:
           git add -- Casks/rustboard.rb bucket/rustboard.json
           if git diff --cached --quiet; then exit 0; fi
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Update release package manifests'
-          git push origin HEAD:main
+          branch="release-manifests/$RELEASE_TAG"
+          git push origin "HEAD:refs/heads/$branch"
+          gh pr create --base main --head "$branch" --title "Update packages to $RELEASE_TAG" --body "Update Homebrew and Scoop manifests for $RELEASE_TAG."
+          # GITHUB_TOKEN-created pull requests do not trigger pull_request workflows.
+          gh workflow run ci.yml --ref "$branch"

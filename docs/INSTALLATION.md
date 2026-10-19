@@ -108,7 +108,6 @@ Windows logs: `%LOCALAPPDATA%/Rustboard/agent.err.log` for installer-started pro
 
 ## Validation and limits
 
-Release evidence is recorded separately in [STATUS.md](STATUS.md); prior file-throughput measurements in [archived performance results](archive/PERFORMANCE_LAYERED.md) are historical, not proof of this installed build.
 
 No folder recursion, native inline-image fidelity, automatic updates, public notarization, universal application compatibility, restart-after-OS-reboot guarantee, or 10G performance claim. Previously measured file throughput is not a promise for every network. Clipboard data is not stored as history; retained synthetic test files are not included in packages.
 
@@ -192,16 +191,6 @@ or denied, change the permission manually in **System Settings → Privacy & Sec
   Firewall rules are separate and are not changed by the installer.
 - **Open Anyway**: after attempting to launch a blocked component, review the
   Gatekeeper message in Privacy & Security and approve it yourself, then retry.
-
-There is no separate permissions command. Installers do not strip quarantine,
-disable Gatekeeper, reset TCC or press approval buttons.
-
-Apple's supported independent distribution route is Developer ID plus notarization.
-This prototype deliberately uses Apple Development signing **without notarization**.
-Open Anyway does not repair invalid signatures or provisioning restrictions.
-Installation and File Provider operation on another clean Mac remain unverified.
-CI is authorized to sign using the exported identity in GitHub Secrets; no
-notarization credentials or requests are used.
 
 References: [Apple local network privacy](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy),
 [Apple safe app opening](https://support.apple.com/102445),

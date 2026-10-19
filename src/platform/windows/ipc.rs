@@ -172,8 +172,15 @@ pub fn request(args: Vec<String>) -> Result<serde_json::Value> {
         };
         match result {
             Ok(h) => break h,
-            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            Err(_) => anyhow::bail!("Agent unavailable; start rustboardd in this user session"),
+            Err(error)
+                if error.code() == ERROR_PIPE_BUSY.to_hresult() && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) if error.code() == ERROR_FILE_NOT_FOUND.to_hresult() => {
+                anyhow::bail!("Agent unavailable; run 'rustboard start'");
+            }
+            Err(error) => return Err(error.into()),
         }
     };
     let mut pipe = Pipe::new(h);

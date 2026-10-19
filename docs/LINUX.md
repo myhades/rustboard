@@ -1,10 +1,15 @@
 # Linux
 
-The Linux backend uses X11 (XFixes), Secret Service and a read-only FUSE mount.
-Wayland sessions are not supported. A desktop session and an unlocked keyring are required.
+Linux supports X11 and GNOME Wayland. Both use Secret Service and the same read-only FUSE mount.
+A desktop session and an unlocked keyring are required. Other Wayland compositors are not supported.
 
-Runtime packages on Debian/Ubuntu: `fuse3`, `libsecret-1-0`, and a Secret Service provider such as GNOME Keyring.
-Build with the Rust toolchain and a C compiler:
+The Wayland backend uses Mutter's D-Bus clipboard session without starting screen sharing or
+creating input devices. It does not need a GNOME Shell extension or XWayland. This is a
+GNOME-specific internal interface, not a compositor-independent Wayland protocol.
+
+Runtime packages on Debian/Ubuntu: `fuse3`, `libsecret-1-0`, `libdbus-1-3`, and a Secret Service
+provider such as GNOME Keyring. Build with the Rust toolchain, a C compiler, `pkg-config`
+and `libdbus-1-dev`:
 
 ```sh
 cargo build --release --locked
@@ -53,3 +58,18 @@ GTK 3 installed. It replaces the clipboard with synthetic text, a tiny PNG and
 The report is written to `test-output/linux/desktop.json`. Checks cover X11 INCR in
 both directions, Thunar copy/paste, zero content reads before opening files,
 active reads across clipboard replacement, and crash recovery.
+
+For an isolated GNOME Wayland check on Ubuntu 24.04, install `mutter`, `wl-clipboard`,
+`gnome-keyring` and `python3-gi`, then run:
+
+```sh
+python3 platforms/linux/scripts/test-wayland.py
+```
+
+This starts a separate headless Mutter session, D-Bus session and temporary keyring. The login
+clipboard is not used. Native Wayland clients exercise text and file capture/publication,
+large clipboard pipes, image-to-file handling, lazy file reads, replacement during transfer,
+and exit cleanup. The report is written to `test-output/linux/wayland.json`.
+
+Platform code is under `src/platform/linux/`; only `clipboard/x11.rs` and `clipboard/gnome.rs`
+differ by desktop session. Files, credentials, IPC and service management are shared.

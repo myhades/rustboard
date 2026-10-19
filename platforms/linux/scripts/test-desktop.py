@@ -62,7 +62,11 @@ try:
     subprocess.Popen(['thunar',str(source_dir)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     source_window=wait(lambda:subprocess.run(['xdotool','search','--onlyvisible','--name','^source -'],env=env,capture_output=True,text=True).stdout.strip()).splitlines()[-1]
     subprocess.run(['xdotool','windowactivate','--sync',source_window],env=env,check=True)
-    subprocess.run(['xdotool','key','--clearmodifiers','ctrl+a','ctrl+c'],env=env,check=True)
+    def copy_source():
+        subprocess.run(['xdotool','key','--clearmodifiers','ctrl+a','ctrl+c'],env=env,check=True)
+        return local.as_uri().encode() in get('text/uri-list').stdout
+    # A visible Thunar window can precede its directory listing becoming ready.
+    wait(copy_source)
     offer=wait(lambda:(o if (o:=read(peerout/'received.json'))['content']['kind']=='files' else None))
     received=peerout/('received-'+offer['content']['files'][0]['file_id']);wait(received.exists);assert received.read_bytes()==local.read_bytes();print('PASS Thunar Ctrl+C and local file transfer',flush=True)
     subprocess.run(['xdotool','windowclose',source_window],env=env,check=True)

@@ -37,12 +37,8 @@ pub fn start(register: bool) -> Result<()> {
         "service commands target the default profile"
     );
     ensure!(
-        std::env::var_os("DISPLAY").is_some(),
-        "X11 desktop session required"
-    );
-    ensure!(
-        std::env::var("XDG_SESSION_TYPE").as_deref() != Ok("wayland"),
-        "Wayland is not supported"
+        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some(),
+        "desktop session required"
     );
     let agent = std::env::current_exe()?
         .parent()
@@ -69,6 +65,7 @@ pub fn start(register: bool) -> Result<()> {
     systemctl(&["daemon-reload"])?;
     for name in [
         "DISPLAY",
+        "WAYLAND_DISPLAY",
         "XAUTHORITY",
         "DBUS_SESSION_BUS_ADDRESS",
         "XDG_SESSION_TYPE",

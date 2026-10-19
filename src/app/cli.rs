@@ -94,11 +94,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
         }
         "start" => {
             service::start(true)?;
-            println!("Started.");
         }
         "stop" => {
             service::stop(true)?;
-            println!("Stopped.");
         }
         "restart" => {
             ensure!(
@@ -107,7 +105,6 @@ pub fn run(args: Vec<String>) -> Result<()> {
             );
             service::stop(false)?;
             service::start(false)?;
-            println!("Restarted.");
         }
         "config" => {
             let p = config_path()?;

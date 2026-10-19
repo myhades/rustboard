@@ -69,6 +69,9 @@ The pairing-only TLS endpoint temporarily uses the configured listening port plu
 
 ## Daily commands
 
+`start`, `stop` and `restart` are silent on success. Failures print an error to
+stderr and return a nonzero exit code. Pairing retains its interactive prompts.
+
 - `status`: compact running state, active listen/mode and active paired-device list. Offline it shows saved peers. This is not a continuous peer connectivity probe. `status --json` is the machine-readable active state and fails when the Agent is unreachable.
 - `start`: immediately starts the installed default service and enables login startup.
 - `stop`: immediately stops it and disables login startup, including launchd KeepAlive. It preserves identity/config/pairs.

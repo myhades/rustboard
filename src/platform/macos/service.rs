@@ -50,33 +50,36 @@ pub fn start(register: bool) -> Result<()> {
         "Rustboard is not installed"
     );
     if crate::app::cli::request(&["status"]).is_err() {
+        let output = Command::new("/usr/bin/pluginkit")
+            .arg("-a")
+            .arg(app.join("Contents/PlugIns/RustboardProvider.appex"))
+            .output()?;
         ensure!(
-            Command::new("/usr/bin/pluginkit")
-                .arg("-a")
-                .arg(app.join("Contents/PlugIns/RustboardProvider.appex"))
-                .status()?
-                .success(),
-            "File Provider registration failed"
+            output.status.success(),
+            "File Provider registration failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
         );
+        let output = Command::new(app.join("Contents/MacOS/Rustboard"))
+            .arg("register")
+            .output()?;
         ensure!(
-            Command::new(app.join("Contents/MacOS/Rustboard"))
-                .arg("register")
-                .status()?
-                .success(),
-            "File Provider initialization failed"
+            output.status.success(),
+            "File Provider initialization failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
         );
+        let output = Command::new("python3")
+            .args([
+                "-c",
+                include_str!("../../../platforms/macos/scripts/launchd.py"),
+            ])
+            .arg(&base)
+            .arg(&app)
+            .arg(&p)
+            .output()?;
         ensure!(
-            Command::new("python3")
-                .args([
-                    "-c",
-                    include_str!("../../../platforms/macos/scripts/launchd.py")
-                ])
-                .arg(&base)
-                .arg(&app)
-                .arg(&p)
-                .status()?
-                .success(),
-            "cannot create login service"
+            output.status.success(),
+            "cannot create login service: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
         );
     }
     if register {

@@ -8,14 +8,15 @@ Do not disable Gatekeeper or remove quarantine attributes to install this build.
 After the Homebrew tap update:
 
 ```sh
-brew install --cask myhades/tap/rustboard
+brew tap myhades/rustboard https://github.com/myhades/rustboard
+brew install --cask myhades/rustboard/rustboard
 ```
 
 After the Scoop bucket update:
 
 ```powershell
-scoop bucket add rustboard https://github.com/myhades/scoop-bucket
-scoop install rustboard/rustboard
+scoop bucket add myhades https://github.com/myhades/rustboard
+scoop install myhades/rustboard
 ```
 
 Both installers are per-user and manage CLI links/PATH and login startup.

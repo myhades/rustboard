@@ -7,7 +7,7 @@ Invoke-WebRequest 'https://raw.githubusercontent.com/ScoopInstaller/Install/1e2f
 $scoop=Join-Path $env:SCOOP 'shims/scoop.ps1'
 $bucket=Join-Path $env:RUNNER_TEMP 'rustboard-test-bucket'
 New-Item -ItemType Directory -Force "$bucket/bucket" | Out-Null
-$manifest=Get-Content target/manifests/scoop-bucket/bucket/rustboard.json -Raw | ConvertFrom-Json
+$manifest=Get-Content target/manifests/bucket/rustboard.json -Raw | ConvertFrom-Json
 $archive=Get-ChildItem target/release-assets/*.zip
 $manifest.architecture.'64bit'.url="http://127.0.0.1:18765/$($archive.Name)"
 $path=Join-Path $bucket 'bucket/rustboard.json'

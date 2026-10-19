@@ -35,7 +35,7 @@ if not a.windows_only:
     template = template.replace('  sha256 "@SHA256@"', f'  sha256 arm: "{arm}", intel: "{intel}"')
     template = template.replace('  url "@URL@"', '  arch arm: "arm64", intel: "x86_64"\n  url "' + url + '/rustboard-#{version}-macos-#{arch}.tar.gz"')
     template = template.replace('  depends_on arch: :@ARCH@\n', '').replace('@VERSION@', version)
-    tap = a.output / "homebrew-tap/Casks"
+    tap = a.output / "Casks"
     tap.mkdir(parents=True, exist_ok=True)
     (tap / "rustboard.rb").write_text(template)
 archive = f"rustboard-{version}-windows-x64.zip"
@@ -50,7 +50,7 @@ scoop = dict(
     installer=dict(script='& "$dir\\platforms\\windows\\scripts\\install.ps1" -Source "$dir\\bin" -NoPath'),
     uninstaller=dict(script='if ($cmd -eq "uninstall") { & "$dir\\platforms\\windows\\scripts\\uninstall.ps1" }'),
     notes=["Configure with rustboard config/pair, then reload.", "Uninstall retains identity and pairing. Scoop manages the CLI shim."])
-bucket = a.output / "scoop-bucket/bucket"
+bucket = a.output / "bucket"
 bucket.mkdir(parents=True, exist_ok=True)
 (bucket / "rustboard.json").write_text(json.dumps(scoop, indent=2) + "\n")
 print(a.output)

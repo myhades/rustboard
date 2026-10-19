@@ -30,6 +30,6 @@ with archive.open('rb') as stream:
 digest=hasher.hexdigest()
 archive.with_suffix(archive.suffix+'.sha256').write_text(digest+'  '+archive.name+'\n')
 formula=(root/'platforms/macos/packaging/rustboard.rb.in').read_text().replace('@VERSION@',version).replace('@URL@',options.release_url or archive.as_uri()).replace('@SHA256@',digest).replace('@ARCH@','arm64' if arch=='arm64' else 'intel')
-tap=out/'homebrew-tap/Casks';tap.mkdir(parents=True,exist_ok=True)
+tap=out/'Casks';tap.mkdir(parents=True,exist_ok=True)
 (tap/'rustboard.rb').write_text(formula)
 print(archive);print('SHA256',digest)

@@ -92,7 +92,7 @@ jobs:
           mkdir assets
           find downloaded -type f -exec cp -n '{}' assets/ \;
           python scripts/release-manifests.py --tag "$RELEASE_TAG" --assets assets --output manifests
-          cp manifests/homebrew-tap/Casks/rustboard.rb assets/
+          cp manifests/Casks/rustboard.rb assets/
           tar -czf assets/package-manifests.tar.gz -C manifests .
       - name: Publish complete release
         run: |
@@ -111,31 +111,22 @@ jobs:
   distribute:
     needs: publish
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: homebrew
-            secret: HOMEBREW_TAP_TOKEN
-          - target: scoop
-            secret: SCOOP_BUCKET_TOKEN
-    env:
-      GH_TOKEN: ${{ secrets[matrix.secret] }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
-          persist-credentials: false
+          ref: main
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: package-manifests
-          path: manifests
-      - name: Update owned package repository
-        env:
-          TARGET: ${{ matrix.target }}
+          path: generated-manifests
+      - name: Commit both package manifests to main
         run: |
-          if [[ "$TARGET" == homebrew ]]; then
-            python scripts/publish-package.py manifests/homebrew-tap/Casks/rustboard.rb homebrew
-          else
-            python scripts/publish-package.py manifests/scoop-bucket/bucket/rustboard.json scoop
-          fi
+          mkdir -p Casks bucket
+          cp generated-manifests/Casks/rustboard.rb Casks/rustboard.rb
+          cp generated-manifests/bucket/rustboard.json bucket/rustboard.json
+          git add -- Casks/rustboard.rb bucket/rustboard.json
+          if git diff --cached --quiet; then exit 0; fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Update release package manifests'
+          git push origin HEAD:main

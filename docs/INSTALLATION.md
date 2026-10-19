@@ -130,21 +130,30 @@ this option makes small files available locally, it does not replace Handoff.
 
 GitHub Actions builds version-tagged releases and updates the owned tap/bucket.
 See [RELEASING.md](RELEASING.md) for Secrets, build and release instructions.
-Both repositories exist; package manifests appear only after the first successful
-signed release. Do not assume these commands work before that release.
+Both manifests live in this repository: Casks/rustboard.rb and bucket/rustboard.json.
+They appear only after the first successful signed release. Do not assume these
+commands work before that release.
 
 ```sh
-brew install --cask myhades/tap/rustboard
+brew tap myhades/rustboard https://github.com/myhades/rustboard
+brew install --cask myhades/rustboard/rustboard
 brew upgrade --cask rustboard
 brew uninstall --cask rustboard
 ```
 
 ```powershell
-scoop bucket add rustboard https://github.com/myhades/scoop-bucket
-scoop install rustboard/rustboard
+scoop bucket add myhades https://github.com/myhades/rustboard
+scoop install myhades/rustboard
 scoop update rustboard
 scoop uninstall rustboard
 ```
+
+The Homebrew tap is named myhades/rustboard; the explicit URL avoids its default
+lookup of a separate homebrew-rustboard repository. The fully qualified Cask name
+is myhades/rustboard/rustboard. On Homebrew 6, installing by this full name trusts
+that Cask; later commands can use rustboard. See [tap trust](https://docs.brew.sh/Tap-Trust).
+Scoop uses a local bucket alias (myhades here), so myhades/rustboard means
+bucket/package. `scoop install rustboard` also works when the name is unambiguous.
 
 Homebrew and Scoop must already be installed. Homebrew owns the CLI link in its
 prefix/bin; Scoop owns its shim. Vendor scripts run with PATH modification disabled

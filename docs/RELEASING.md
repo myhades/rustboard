@@ -5,8 +5,9 @@ clipboard backend or package is introduced. Rust is pinned in rust-toolchain.tom
 and workflows; dependencies use Cargo.lock. macOS binaries target macOS 13.0.
 
 Release builds use GitHub-hosted runners. Signing does not run on pull requests.
-Actions are pinned to commit hashes. The only job with repository write access
-publishes release assets. Cross-repository distribution uses separate tokens.
+Actions are pinned to commit hashes. Only release publication and manifest updates
+have repository write access. Both use the built-in GITHUB_TOKEN; no extra GitHub
+tokens or distribution repositories are required.
 
 ## Signing status
 
@@ -37,10 +38,6 @@ In `myhades/rustboard`, Settings -> Secrets and variables -> Actions:
 * `MACOS_CERTIFICATE_PASSWORD`: that export password.
 * `MACOS_SIGN_IDENTITY`: the certificate SHA-1 identifier used by sign.sh. Use the
   same signing team as installed versions to retain App Group and Keychain access.
-* `HOMEBREW_TAP_TOKEN`: fine-grained GitHub token with Contents read/write only on
-  `myhades/homebrew-tap`.
-* `SCOOP_BUCKET_TOKEN`: fine-grained GitHub token with Contents read/write only on
-  `myhades/scoop-bucket`.
 
 Never paste the .p12, password or token into chat, commits, or workflow inputs.
 With `gh` authenticated on the Mac, import without printing the certificate:
@@ -49,11 +46,9 @@ With `gh` authenticated on the Mac, import without printing the certificate:
 base64 -i /absolute/private/path/rustboard-signing.p12 | gh secret set MACOS_CERTIFICATE_P12_BASE64 --repo myhades/rustboard
 gh secret set MACOS_CERTIFICATE_PASSWORD --repo myhades/rustboard
 gh secret set MACOS_SIGN_IDENTITY --repo myhades/rustboard
-gh secret set HOMEBREW_TAP_TOKEN --repo myhades/rustboard
-gh secret set SCOOP_BUCKET_TOKEN --repo myhades/rustboard
 ```
 
-The last four commands prompt locally; do not add passwords on the command line.
+The last two commands prompt locally; do not add passwords on the command line.
 The Mac job creates a temporary keychain, imports this identity, signs, and deletes
 the keychain and exported file on exit. No Apple account password is needed and
 there is no notarization request. An expired/revoked certificate fails the job.
@@ -67,22 +62,25 @@ there is no notarization request. An expired/revoked certificate fails the job.
    bucket install, disabled-service update, identity preservation and uninstall.
 4. Only after all builds pass, publish archives, SHA-256 sidecars and generated
    manifests. Published assets are immutable; use a new version to fix them.
-5. Update the custom Homebrew tap and Scoop bucket directly. Neither custom
-   repository requires a community review. No WinGet or separate EXE installer.
+5. Commit Casks/rustboard.rb and bucket/rustboard.json to main in this repository
+   using GITHUB_TOKEN. Only these two generated files are staged; source and release
+   tags are unchanged. No community review, WinGet or separate EXE installer.
 
 Prerelease tags (for example v0.1.1-beta.1) require the same Cargo version and
-create a GitHub prerelease; both custom repositories receive that build.
+create a GitHub prerelease; both package manifests receive that build.
 Release can also be dispatched for an existing tag. Retry failed distribution
 jobs with GitHub's **Re-run failed jobs**, rather than rebuilding published assets.
 If signing Secrets are missing, builds fail before public release creation.
 
-The tap and bucket repositories must exist on main. Do not add manifests with
-placeholder URLs/hashes. First successful release creates Casks/rustboard.rb and
-bucket/rustboard.json. Users install Scoop separately from https://scoop.sh/.
+The main repository serves both managers. Do not add manifests with placeholder
+URLs/hashes. The first successful release creates Casks/rustboard.rb and
+bucket/rustboard.json on main. Repository rules must permit the workflow bot to
+push these updates; if a push fails, rerun the distribution job after resolving it.
+Users install Scoop separately from https://scoop.sh/.
 
 ```powershell
-scoop bucket add rustboard https://github.com/myhades/scoop-bucket
-scoop install rustboard/rustboard
+scoop bucket add myhades https://github.com/myhades/rustboard
+scoop install myhades/rustboard
 scoop update rustboard
 scoop uninstall rustboard
 ```

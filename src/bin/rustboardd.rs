@@ -4,7 +4,9 @@ fn main() -> std::process::ExitCode {
     let result = rustboard::platform::windows::clipboard::run();
     #[cfg(target_os = "macos")]
     let result = rustboard::platform::macos::run();
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    let result = rustboard::platform::linux::run();
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     let result: anyhow::Result<()> = Err(anyhow::anyhow!(
         "Native backend not installed on this platform"
     ));

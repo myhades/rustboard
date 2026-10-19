@@ -1,7 +1,7 @@
 fn main() -> std::process::ExitCode {
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     let result = rustboard::app::cli::run(std::env::args().skip(1).collect());
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     let result: anyhow::Result<()> = Err(anyhow::anyhow!("native platform unavailable"));
     match result {
         Ok(()) => std::process::ExitCode::SUCCESS,

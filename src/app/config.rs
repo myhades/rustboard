@@ -3,6 +3,8 @@ use crate::core::{
     engine::Engine,
     transport::{Identity, Peer, device_from_pin},
 };
+#[cfg(target_os = "linux")]
+use crate::platform::linux::credential;
 #[cfg(target_os = "macos")]
 use crate::platform::macos::credential;
 #[cfg(windows)]

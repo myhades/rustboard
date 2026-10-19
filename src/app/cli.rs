@@ -1,4 +1,6 @@
 //! Shared CLI presentation; service integration stays in platform modules.
+#[cfg(target_os = "linux")]
+use crate::platform::linux::{ipc, service};
 #[cfg(target_os = "macos")]
 use crate::platform::macos::{ipc, service};
 #[cfg(windows)]

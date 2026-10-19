@@ -1,11 +1,13 @@
 # Linux
 
-Linux supports X11 and GNOME Wayland. Both use Secret Service and the same read-only FUSE mount.
-A desktop session and an unlocked keyring are required. Other Wayland compositors are not supported.
+Linux supports X11, GNOME Wayland, and Wayland compositors exposing `ext-data-control-v1`,
+including recent KDE Plasma. All use Secret Service and the same read-only FUSE mount.
+A desktop session and an unlocked keyring are required.
 
-The Wayland backend uses Mutter's D-Bus clipboard session without starting screen sharing or
-creating input devices. It does not need a GNOME Shell extension or XWayland. This is a
-GNOME-specific internal interface, not a compositor-independent Wayland protocol.
+Wayland selects the advertised data-control interface on the first seat. GNOME uses Mutter's
+D-Bus clipboard session when data-control is absent, without starting screen sharing or
+creating input devices. No GNOME Shell extension or XWayland is required. If neither interface
+is available, startup reports an error. The older `wlr-data-control` protocol is not used.
 
 Runtime packages on Debian/Ubuntu: `fuse3`, `libsecret-1-0`, `libdbus-1-3`, and a Secret Service
 provider such as GNOME Keyring. Build with the Rust toolchain, a C compiler, `pkg-config`
@@ -63,13 +65,27 @@ For an isolated GNOME Wayland check on Ubuntu 24.04, install `mutter`, `wl-clipb
 `gnome-keyring` and `python3-gi`, then run:
 
 ```sh
-python3 platforms/linux/scripts/test-wayland.py
+python3 platforms/linux/scripts/test-wayland.py --compositor mutter
 ```
 
 This starts a separate headless Mutter session, D-Bus session and temporary keyring. The login
 clipboard is not used. Native Wayland clients exercise text and file capture/publication,
 large clipboard pipes, image-to-file handling, lazy file reads, replacement during transfer,
-and exit cleanup. The report is written to `test-output/linux/wayland.json`.
+and exit cleanup. The report is written to `test-output/linux/wayland-mutter.json`.
 
-Platform code is under `src/platform/linux/`; only `clipboard/x11.rs` and `clipboard/gnome.rs`
-differ by desktop session. Files, credentials, IPC and service management are shared.
+For KWin, install a version exposing `ext-data-control-v1`, plus `dolphin`, `qt6-wayland`,
+`wayland-utils`, `wl-clipboard`, `gnome-keyring` and `python3-gi`, then run:
+
+```sh
+python3 platforms/linux/scripts/test-wayland.py --compositor kwin
+```
+
+This runs the same checks in an isolated virtual KWin session, plus Dolphin's Paste action
+and destination content checks. The report is `test-output/linux/wayland-kwin.json`.
+The suite has been run with Mutter 46 on Ubuntu 24.04 and KWin 6.6.4 / Dolphin 25.12.3
+in an isolated Ubuntu 26.04 environment. Dolphin Copy through keyboard input still needs a
+regular desktop session; the virtual test uses native Wayland clients for source capture.
+
+Platform code is under `src/platform/linux/`. The clipboard implementations are `x11.rs`,
+`gnome.rs` and `data_control.rs`; both Wayland interfaces share bounded nonblocking pipe IO.
+MIME handling, files, credentials, IPC and service management are shared.

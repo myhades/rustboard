@@ -259,11 +259,13 @@ impl Filesystem for Files {
             reply.error(libc::EBADF);
             return;
         };
-        if offset < 0 || size > 1024 * 1024 {
+        if offset < 0 {
             reply.error(libc::EINVAL);
             return;
         }
-        let mut bytes = vec![0; size as usize];
+        let remaining = file.source.len().saturating_sub(offset as u64);
+        let length = u64::from(size).min(remaining).min(1024 * 1024) as usize;
+        let mut bytes = vec![0; length];
         let mut total = 0;
         while total < bytes.len() {
             let end = (total + crate::core::MAX_CHUNK).min(bytes.len());

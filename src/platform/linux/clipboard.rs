@@ -1,8 +1,20 @@
+mod data_control;
 mod gnome;
+mod pipe;
 mod x11;
 
 use anyhow::{Result, ensure};
 use std::path::{Path, PathBuf};
+
+const MIMES: [&str; 7] = [
+    "text/uri-list",
+    "x-special/gnome-copied-files",
+    "image/png",
+    "image/jpeg",
+    "text/plain;charset=utf-8",
+    "UTF8_STRING",
+    "text/plain",
+];
 
 pub enum Captured {
     Text(String),
@@ -14,11 +26,20 @@ pub enum Captured {
 pub enum Clipboard {
     X11(Box<x11::Clipboard>),
     Gnome(Box<gnome::Clipboard>),
+    DataControl(Box<data_control::Clipboard>),
 }
 impl Clipboard {
     pub fn new() -> Result<Self> {
         if std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland") {
-            Ok(Self::Gnome(Box::new(gnome::Clipboard::new()?)))
+            match data_control::Clipboard::connect()? {
+                Some(clipboard) => Ok(Self::DataControl(Box::new(clipboard))),
+                None => match gnome::Clipboard::connect()? {
+                    Some(clipboard) => Ok(Self::Gnome(Box::new(clipboard))),
+                    None => anyhow::bail!(
+                        "desktop must provide ext-data-control-v1 or GNOME clipboard access"
+                    ),
+                },
+            }
         } else {
             Ok(Self::X11(Box::new(x11::Clipboard::new()?)))
         }
@@ -27,24 +48,28 @@ impl Clipboard {
         match self {
             Self::X11(c) => c.poll(),
             Self::Gnome(c) => c.poll(),
+            Self::DataControl(c) => c.poll(),
         }
     }
     pub fn publish_text(&mut self, text: &str) -> Result<()> {
         match self {
             Self::X11(c) => c.publish_text(text),
             Self::Gnome(c) => c.publish_text(text),
+            Self::DataControl(c) => c.publish_text(text),
         }
     }
     pub fn publish_files(&mut self, paths: &[PathBuf]) -> Result<()> {
         match self {
             Self::X11(c) => c.publish_files(paths),
             Self::Gnome(c) => c.publish_files(paths),
+            Self::DataControl(c) => c.publish_files(paths),
         }
     }
     pub fn clear_owned(&mut self) -> Result<()> {
         match self {
             Self::X11(c) => c.clear_owned(),
             Self::Gnome(c) => c.clear_owned(),
+            Self::DataControl(c) => c.clear_owned(),
         }
     }
 }

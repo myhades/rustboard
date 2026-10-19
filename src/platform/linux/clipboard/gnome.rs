@@ -1,5 +1,8 @@
-use super::Captured;
-use anyhow::{Context, Result, ensure};
+use super::{
+    Captured, MIMES,
+    pipe::{Receiving, Sending},
+};
+use anyhow::{Context, Result};
 use dbus::{
     arg::{OwnedFd, PropMap, Variant},
     blocking::Connection,
@@ -8,51 +11,32 @@ use dbus::{
 use std::{
     collections::HashMap,
     fs::File,
-    io::{Read, Write},
-    os::fd::{AsRawFd, FromRawFd},
+    os::fd::FromRawFd,
     path::PathBuf,
     sync::{Arc, atomic::Ordering},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 const BUS: &str = "org.gnome.Mutter.RemoteDesktop";
 const IFACE: &str = "org.gnome.Mutter.RemoteDesktop.Session";
 const TIMEOUT: Duration = Duration::from_secs(5);
-const MIMES: [&str; 7] = [
-    "text/uri-list",
-    "x-special/gnome-copied-files",
-    "image/png",
-    "image/jpeg",
-    "text/plain;charset=utf-8",
-    "UTF8_STRING",
-    "text/plain",
-];
-
-struct Receiving {
-    file: File,
-    mime: &'static str,
-    bytes: Vec<u8>,
-    touched: Instant,
-}
-struct Sending {
-    file: File,
-    bytes: Arc<Vec<u8>>,
-    offset: usize,
-    serial: u32,
-    touched: Instant,
-}
-
 pub struct Clipboard {
     conn: Connection,
     path: dbus::Path<'static>,
     owner: String,
     formats: HashMap<String, Arc<Vec<u8>>>,
     receiving: Option<Receiving>,
-    sending: Vec<Sending>,
+    sending: Vec<(u32, Sending)>,
 }
 impl Clipboard {
-    pub fn new() -> Result<Self> {
+    pub fn connect() -> Result<Option<Self>> {
         let conn = Connection::new_session()?;
+        let (available,): (bool,) = conn
+            .with_proxy("org.freedesktop.DBus", "/org/freedesktop/DBus", TIMEOUT)
+            .method_call("org.freedesktop.DBus", "NameHasOwner", (BUS,))?;
+        if !available {
+            return Ok(None);
+        }
         let (owner,): (String,) = conn
             .with_proxy("org.freedesktop.DBus", "/org/freedesktop/DBus", TIMEOUT)
             .method_call("org.freedesktop.DBus", "GetNameOwner", (BUS,))
@@ -82,14 +66,14 @@ impl Clipboard {
         )?;
         // EnableClipboard reports the existing selection. As on X11, capture only subsequent changes.
         while conn.channel().pop_message().is_some() {}
-        Ok(Self {
+        Ok(Some(Self {
             conn,
             path,
             owner,
             formats: HashMap::new(),
             receiving: None,
             sending: Vec::new(),
-        })
+        }))
     }
     fn call<A: dbus::arg::AppendAll, R: dbus::arg::ReadAll>(
         &self,
@@ -155,15 +139,10 @@ impl Clipboard {
                     {
                         match self
                             .call::<_, (OwnedFd,)>("SelectionWrite", (serial,))
-                            .and_then(|(fd,)| nonblocking(fd))
-                        {
-                            Ok(file) => self.sending.push(Sending {
-                                file,
-                                bytes,
-                                offset: 0,
-                                serial,
-                                touched: Instant::now(),
-                            }),
+                            .and_then(|(fd,)| {
+                                Sending::new(unsafe { File::from_raw_fd(fd.into_fd()) }, bytes)
+                            }) {
+                            Ok(send) => self.sending.push((serial, send)),
                             Err(_) => self.done(serial, false),
                         }
                     } else {
@@ -189,70 +168,31 @@ impl Clipboard {
                     .collect();
                 if let Some(mime) = MIMES.into_iter().find(|m| types.contains(m)) {
                     let (fd,): (OwnedFd,) = self.call("SelectionRead", (mime,))?;
-                    self.receiving = Some(Receiving {
-                        file: nonblocking(fd)?,
+                    self.receiving = Some(Receiving::new(
+                        unsafe { File::from_raw_fd(fd.into_fd()) },
                         mime,
-                        bytes: Vec::new(),
-                        touched: Instant::now(),
-                    });
+                    )?);
                 } else {
                     captured = Some(Captured::Unsupported);
                 }
             }
         }
         if let Some(mut read) = self.receiving.take() {
-            ensure!(read.touched.elapsed() < TIMEOUT, "clipboard read timed out");
-            let mut buffer = [0u8; 65536];
-            let mut complete = false;
-            for _ in 0..16 {
-                match read.file.read(&mut buffer) {
-                    Ok(0) => {
-                        complete = true;
-                        break;
-                    }
-                    Ok(n) => {
-                        ensure!(
-                            read.bytes.len() + n <= crate::app::image_file::MAX_IMAGE_BYTES,
-                            "clipboard data too large"
-                        );
-                        read.bytes.extend_from_slice(&buffer[..n]);
-                        read.touched = Instant::now();
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(e.into()),
-                }
-            }
-            if complete {
-                captured = Some(super::capture(read.mime, read.bytes)?);
+            if let Some(value) = read.poll()? {
+                captured = Some(value);
             } else {
                 self.receiving = Some(read);
             }
         }
         let mut index = 0;
         while index < self.sending.len() {
-            let send = &mut self.sending[index];
-            let mut failed = send.touched.elapsed() >= TIMEOUT;
-            if !failed {
-                match send.file.write(&send.bytes[send.offset..]) {
-                    Ok(n) => {
-                        send.offset += n;
-                        send.touched = Instant::now();
-                    }
-                    Err(e)
-                        if matches!(
-                            e.kind(),
-                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-                        ) => {}
-                    Err(_) => failed = true,
+            match self.sending[index].1.poll() {
+                Ok(false) => index += 1,
+                result => {
+                    let (serial, send) = self.sending.swap_remove(index);
+                    drop(send);
+                    self.done(serial, result.is_ok());
                 }
-            }
-            if failed || send.offset == send.bytes.len() {
-                let serial = send.serial;
-                self.sending.swap_remove(index); // Close the pipe before acknowledging completion.
-                self.done(serial, !failed);
-            } else {
-                index += 1;
             }
         }
         Ok(captured)
@@ -302,15 +242,4 @@ impl Drop for Clipboard {
         let _ = self.call::<_, ()>("DisableClipboard", ());
         // Closing the D-Bus connection destroys its unstarted session.
     }
-}
-fn nonblocking(fd: OwnedFd) -> Result<File> {
-    let file = unsafe { File::from_raw_fd(fd.into_fd()) };
-    let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
-    ensure!(
-        flags >= 0
-            && unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) }
-                == 0,
-        "cannot configure clipboard pipe"
-    );
-    Ok(file)
 }

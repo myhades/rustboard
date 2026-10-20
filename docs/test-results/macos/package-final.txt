@@ -1,2 +1,0 @@
-/Users/myhades/Documents/GitHub/rustboard/target/macos/rustboard-0.1.0-macos.tar.gz
-SHA256 3cee1e598e836b959df4f24a059719800371d6f8b3ca6b17c65d5a0085e089f8

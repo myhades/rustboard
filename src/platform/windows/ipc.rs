@@ -35,9 +35,12 @@ impl Drop for Handle {
 }
 
 pub fn user_sid() -> Result<String> {
+    process_sid(unsafe { GetCurrentProcess() })
+}
+fn process_sid(process: HANDLE) -> Result<String> {
     unsafe {
         let mut token = HANDLE::default();
-        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)?;
+        OpenProcessToken(process, TOKEN_QUERY, &mut token)?;
         let token = Handle(token);
         let mut size = 0;
         let _ = GetTokenInformation(token.0, TokenUser, None, 0, &mut size);
@@ -155,6 +158,19 @@ impl Write for Pipe {
         Ok(())
     }
 }
+fn authenticate_server(pipe: HANDLE) -> Result<()> {
+    unsafe {
+        let mut pid = 0;
+        GetNamedPipeServerProcessId(pipe, &mut pid)?;
+        let process = Handle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)?);
+        ensure!(
+            process_sid(process.0)? == user_sid()?,
+            "untrusted IPC server"
+        );
+    }
+    Ok(())
+}
+
 pub fn request(args: Vec<String>) -> Result<serde_json::Value> {
     let name = pipe_name()?;
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -166,7 +182,7 @@ pub fn request(args: Vec<String>) -> Result<serde_json::Value> {
                 FILE_SHARE_MODE::default(),
                 None,
                 OPEN_EXISTING,
-                FILE_FLAGS_AND_ATTRIBUTES::default(),
+                SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
                 None,
             )
         };
@@ -184,6 +200,7 @@ pub fn request(args: Vec<String>) -> Result<serde_json::Value> {
         }
     };
     let mut pipe = Pipe::new(h);
+    authenticate_server(h)?;
     unsafe {
         SetNamedPipeHandleState(h, Some(&PIPE_NOWAIT), None, None)?;
     }
@@ -295,5 +312,44 @@ impl Server {
             _ => anyhow::bail!("unknown command"),
         }
         Ok(serde_json::json!({"ok":true}))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn pipe_server_identity_is_checked() {
+        unsafe {
+            let name = wide(&format!(
+                r"\\.\pipe\Rustboard-test-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let server = Handle(CreateNamedPipeW(
+                PCWSTR(name.as_ptr()),
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_TYPE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                1,
+                4096,
+                4096,
+                1000,
+                None,
+            ));
+            assert!(!server.0.is_invalid());
+            let client = Handle(
+                CreateFileW(
+                    PCWSTR(name.as_ptr()),
+                    GENERIC_READ.0 | GENERIC_WRITE.0,
+                    FILE_SHARE_MODE::default(),
+                    None,
+                    OPEN_EXISTING,
+                    SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+                    None,
+                )
+                .unwrap(),
+            );
+            authenticate_server(client.0).unwrap();
+            assert!(authenticate_server(INVALID_HANDLE_VALUE).is_err());
+        }
     }
 }

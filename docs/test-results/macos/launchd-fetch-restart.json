@@ -1,6 +1,0 @@
-{
-  "before": "pid = 79783",
-  "after": "pid = 79797",
-  "identity_preserved": true,
-  "fetch": "PASS real Finder 4KiB and hash after subsequent scoped-URL host fix"
-}

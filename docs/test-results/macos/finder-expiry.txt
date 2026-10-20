@@ -1,5 +1,0 @@
-Timestamp               Ty Process[PID:TID]
-2026-10-17 01:51:31.506 Df RustboardProvider[76007:3c3b35] [org.rustboard:provider] fetch_start
-2026-10-17 01:51:37.618 E  RustboardProvider[76007:3c3c9e] [org.rustboard:provider] fetch_failed
-2026-10-17 01:51:37.623 Df RustboardProvider[76007:3c3c9d] [org.rustboard:provider] fetch_start
-2026-10-17 01:51:37.633 E  RustboardProvider[76007:3c3c9e] [org.rustboard:provider] fetch_failed

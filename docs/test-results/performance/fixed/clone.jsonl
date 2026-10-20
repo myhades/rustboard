@@ -1,3 +1,0 @@
-{"bytes": 4096, "snapshot_clone_seconds": 9.645800000000065e-05, "delivery_clone_seconds": 9.179100000000079e-05, "cow_hashes_verified": true, "scope": "clonefile primitives, not File Provider delivery; no hash/fsync in clone timer"}
-{"bytes": 67108864, "snapshot_clone_seconds": 0.00016329100000000984, "delivery_clone_seconds": 0.0001101249999999887, "cow_hashes_verified": true, "scope": "clonefile primitives, not File Provider delivery; no hash/fsync in clone timer"}
-{"bytes": 1073741824, "snapshot_clone_seconds": 0.0001490000000003988, "delivery_clone_seconds": 8.787499999973747e-05, "cow_hashes_verified": true, "scope": "clonefile primitives, not File Provider delivery; no hash/fsync in clone timer"}

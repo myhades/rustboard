@@ -1,3 +1,0 @@
-file publication failed
-ipc identity denied
-ipc identity denied

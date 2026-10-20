@@ -1,5 +1,0 @@
-   Compiling rustboard-platform v0.1.0 (/Users/myhades/Documents/GitHub/rustboard/crates/rustboard-platform)
-   Compiling rustboardd v0.1.0 (/Users/myhades/Documents/GitHub/rustboard/crates/rustboardd)
-   Compiling rustboard-cli v0.1.0 (/Users/myhades/Documents/GitHub/rustboard/crates/rustboard-cli)
-    Finished `release` profile [optimized] target(s) in 2.21s
-Built /Users/myhades/Documents/GitHub/rustboard/target/macos/Rustboard.app; run scripts/macos/sign.sh with SIGN_IDENTITY before running.

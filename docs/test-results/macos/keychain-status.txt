@@ -1,1 +1,0 @@
-SecKeychainGetStatus=0 unlocked=false readable=true writable=false

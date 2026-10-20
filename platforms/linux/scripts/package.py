@@ -19,7 +19,7 @@ with tarfile.open(archive, "w:gz") as tar:
     for name in ["install.sh", "uninstall.sh"]:
         tar.add(root / "platforms/linux/scripts" / name, arcname="platforms/linux/scripts/" + name)
     tar.add(root / "LICENSE", arcname="LICENSE")
-    tar.add(root / "docs/LINUX.md", arcname="docs/LINUX.md")
+    tar.add(root / "README.md", arcname="README.md")
 with archive.open("rb") as stream:
     digest = hashlib.file_digest(stream, "sha256").hexdigest()
 archive.with_name(archive.name + ".sha256").write_text(digest + "  " + archive.name + "\n")

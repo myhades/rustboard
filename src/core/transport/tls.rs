@@ -165,6 +165,69 @@ impl ClientCertVerifier for Pins {
     }
 }
 
+// complete_io may perform many reads internally; enforce the total budget on each I/O.
+pub(super) struct HandshakeIo<'a> {
+    socket: &'a mut TcpStream,
+    deadline: Instant,
+    active: Option<&'a dyn Fn() -> bool>,
+}
+impl<'a> HandshakeIo<'a> {
+    pub(super) fn new(socket: &'a mut TcpStream) -> Self {
+        Self {
+            socket,
+            deadline: Instant::now() + Duration::from_secs(5),
+            active: None,
+        }
+    }
+    pub(super) fn while_active(mut self, active: &'a dyn Fn() -> bool) -> Self {
+        self.active = Some(active);
+        self
+    }
+    fn remaining(&self) -> std::io::Result<Duration> {
+        if self.active.is_some_and(|active| !active()) {
+            return Err(std::io::ErrorKind::ConnectionAborted.into());
+        }
+        self.deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or_else(|| std::io::ErrorKind::TimedOut.into())
+    }
+}
+impl Read for HandshakeIo<'_> {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            self.socket
+                .set_read_timeout(Some(self.remaining()?.min(Duration::from_millis(200))))?;
+            match self.socket.read(bytes) {
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) =>
+                {
+                    continue;
+                }
+                result => return result,
+            }
+        }
+    }
+}
+impl Write for HandshakeIo<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.socket.set_write_timeout(Some(self.remaining()?))?;
+        self.socket.write(bytes)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.socket.flush()
+    }
+}
+impl Drop for HandshakeIo<'_> {
+    fn drop(&mut self) {
+        let _ = self.socket.set_read_timeout(Some(Duration::from_secs(5)));
+        let _ = self.socket.set_write_timeout(Some(Duration::from_secs(5)));
+    }
+}
+
 pub type Client = StreamOwned<ClientConnection, TcpStream>;
 pub(super) const ALPN_V2: &[u8] = b"rustboard/2";
 pub(super) fn crypto_provider() -> rustls::crypto::CryptoProvider {
@@ -206,8 +269,11 @@ pub fn connect(identity: &Identity, peer: &Peer) -> Result<Client> {
     socket.set_nodelay(true)?;
     let conn = ClientConnection::new(Arc::new(config), ServerName::try_from("rustboard.local")?)?;
     let mut stream = StreamOwned::new(conn, socket);
-    while stream.conn.is_handshaking() {
-        stream.conn.complete_io(&mut stream.sock)?;
+    {
+        let mut io = HandshakeIo::new(&mut stream.sock);
+        while stream.conn.is_handshaking() {
+            stream.conn.complete_io(&mut io)?;
+        }
     }
     ensure!(
         matches!(stream.conn.alpn_protocol(), Some(ALPN_V2)),

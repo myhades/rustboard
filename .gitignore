@@ -26,3 +26,6 @@ Desktop.ini
 # Python test helper bytecode
 __pycache__/
 *.py[cod]
+
+# Local development notes and test evidence
+/docs/

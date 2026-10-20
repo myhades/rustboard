@@ -1,2 +1,0 @@
-target/macos-large-test: replacing existing signature
-target/macos-large-test: errSecInternalComponent

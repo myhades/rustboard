@@ -1,9 +1,0 @@
-{
-  "status": "PASS",
-  "build": "/Users/myhades/Documents/GitHub/rustboard/target/macos",
-  "before": "pid = 68802",
-  "after": "pid = 68822",
-  "ipc": "signed CLI doctor before/after",
-  "identity_persisted": true,
-  "scope": "same-login process recovery; NOT File Provider fetch, login, or machine reboot"
-}

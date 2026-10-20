@@ -1,4 +1,0 @@
-{
-  "Test": "pause stops remote source reads after bounded in-flight chunks",
-  "Pass": true
-}

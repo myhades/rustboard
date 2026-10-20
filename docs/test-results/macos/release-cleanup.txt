@@ -1,8 +1,0 @@
-unpair: {
-  "ok": true
-}
-{
-  "ok": true,
-  "peers": []
-}
-Verified: no running rustboardd or macos_acceptance_peer; launchctl service absent; host status lists no acceptance domain.

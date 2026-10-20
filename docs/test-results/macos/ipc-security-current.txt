@@ -1,3 +1,0 @@
-PASS ordinary same-UID Python client rejected (EOF)
-socket mode 0o600
-directory mode 0o700

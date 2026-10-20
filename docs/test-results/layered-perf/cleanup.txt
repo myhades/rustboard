@@ -1,8 +1,0 @@
-{
-  "ok": true
-}
-{
-  "ok": true
-}
-
-96581 target/macos/bin/rustboardd --listen 192.168.100.4:45452

@@ -25,7 +25,7 @@ cask "rustboard" do
     macOS may require manual Open Anyway approval.
     Configure listen and pairing after installation: rustboard config
     Apply saved changes: rustboard reload
-    Permissions: see docs/INSTALLATION.md for manual System Settings instructions.
+    Allow Local Network access when prompted; manage permissions in System Settings > Privacy & Security.
     Full Disk Access is only needed for protected source locations.
     Uninstall retains identity, peers and configuration.
   EOS

@@ -4,7 +4,6 @@ const ALPN: &[u8] = b"rustboard-pair/1";
 pub struct Channel {
     stream: Box<dyn PairIo>,
     pub pin: String,
-    pub socket: TcpStream,
 }
 trait PairIo: Read + Write + Send {}
 impl<T: Read + Write + Send> PairIo for T {}
@@ -78,7 +77,7 @@ fn socket(socket: &TcpStream) -> Result<()> {
     socket.set_nodelay(true)?;
     Ok(())
 }
-pub fn connect(identity: &Identity, address: SocketAddr) -> Result<Channel> {
+pub fn connect(identity: &Identity, sock: TcpStream, active: &dyn Fn() -> bool) -> Result<Channel> {
     let mut config =
         ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
             .with_protocol_versions(&[&version::TLS13])?
@@ -92,12 +91,14 @@ pub fn connect(identity: &Identity, address: SocketAddr) -> Result<Channel> {
                 identity.key(),
             )?;
     config.alpn_protocols = vec![ALPN.to_vec()];
-    let sock = TcpStream::connect_timeout(&address, Duration::from_secs(3))?;
     socket(&sock)?;
     let conn = ClientConnection::new(Arc::new(config), ServerName::try_from("rustboard.local")?)?;
     let mut s = StreamOwned::new(conn, sock);
-    while s.conn.is_handshaking() {
-        s.conn.complete_io(&mut s.sock)?;
+    {
+        let mut io = tls::HandshakeIo::new(&mut s.sock).while_active(active);
+        while s.conn.is_handshaking() {
+            s.conn.complete_io(&mut io)?;
+        }
     }
     ensure!(
         s.conn.alpn_protocol() == Some(ALPN),
@@ -111,14 +112,12 @@ pub fn connect(identity: &Identity, address: SocketAddr) -> Result<Channel> {
     );
     // Human confirmation is bounded by the session deadline in the platform layer.
     s.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
-    let socket = s.sock.try_clone()?;
     Ok(Channel {
         stream: Box::new(s),
         pin,
-        socket,
     })
 }
-pub fn accept(identity: &Identity, sock: TcpStream) -> Result<Channel> {
+pub fn accept(identity: &Identity, sock: TcpStream, active: &dyn Fn() -> bool) -> Result<Channel> {
     socket(&sock)?;
     let mut config =
         ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
@@ -133,8 +132,11 @@ pub fn accept(identity: &Identity, sock: TcpStream) -> Result<Channel> {
             )?;
     config.alpn_protocols = vec![ALPN.to_vec()];
     let mut s = StreamOwned::new(ServerConnection::new(Arc::new(config))?, sock);
-    while s.conn.is_handshaking() {
-        s.conn.complete_io(&mut s.sock)?;
+    {
+        let mut io = tls::HandshakeIo::new(&mut s.sock).while_active(active);
+        while s.conn.is_handshaking() {
+            s.conn.complete_io(&mut io)?;
+        }
     }
     ensure!(
         s.conn.alpn_protocol() == Some(ALPN),
@@ -147,16 +149,56 @@ pub fn accept(identity: &Identity, sock: TcpStream) -> Result<Channel> {
             .as_ref(),
     );
     s.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
-    let socket = s.sock.try_clone()?;
     Ok(Channel {
         stream: Box::new(s),
         pin,
-        socket,
     })
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn slow_handshake_has_a_total_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let socket = listener.accept().unwrap().0;
+        // A valid record header followed by a body that never finishes within the budget.
+        client.write_all(&[22, 3, 3, 0x10, 0]).unwrap();
+        let sender = std::thread::spawn(move || {
+            for _ in 0..350 {
+                if client.write_all(&[0]).is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let started = Instant::now();
+        assert!(accept(&Identity::generate().unwrap(), socket, &|| true).is_err());
+        assert!(started.elapsed() < Duration::from_secs(7));
+        sender.join().unwrap();
+    }
+
+    #[test]
+    fn cancellation_interrupts_an_incomplete_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let _client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let socket = listener.accept().unwrap().0;
+        let cancel = socket.try_clone().unwrap();
+        let active = Arc::new(AtomicBool::new(true));
+        let worker_active = active.clone();
+        let worker = std::thread::spawn(move || {
+            accept(&Identity::generate().unwrap(), socket, &|| {
+                worker_active.load(Ordering::Acquire)
+            })
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        let started = Instant::now();
+        active.store(false, Ordering::Release);
+        cancel.shutdown(std::net::Shutdown::Both).unwrap();
+        assert!(worker.join().unwrap().is_err());
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
     #[test]
     fn enrollment_proves_both_keys_and_rejects_sync_alpn() {
         let a = Identity::generate().unwrap();
@@ -166,7 +208,7 @@ mod tests {
         let server_identity = a.clone();
         let expected = b.pin();
         let t = std::thread::spawn(move || {
-            let mut c = accept(&server_identity, listener.accept().unwrap().0).unwrap();
+            let mut c = accept(&server_identity, listener.accept().unwrap().0, &|| true).unwrap();
             assert_eq!(c.pin, expected);
             assert_eq!(c.receive(|| true).unwrap(), 45452);
             std::thread::sleep(Duration::from_millis(350));
@@ -182,7 +224,7 @@ mod tests {
             assert!(error.to_string().contains("pairing cancelled"));
             assert!(started.elapsed() < Duration::from_secs(2));
         });
-        let mut c = connect(&b, address).unwrap();
+        let mut c = connect(&b, TcpStream::connect(address).unwrap(), &|| true).unwrap();
         assert_eq!(c.pin, a.pin());
         c.send(45452).unwrap();
         assert_eq!(c.receive(|| true).unwrap(), 45451);
@@ -194,7 +236,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let pin = a.pin();
         let t = std::thread::spawn(move || {
-            assert!(accept(&a, listener.accept().unwrap().0).is_err());
+            assert!(accept(&a, listener.accept().unwrap().0, &|| true).is_err());
         });
         assert!(
             super::super::connect(

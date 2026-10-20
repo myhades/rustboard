@@ -1,6 +1,0 @@
-{
-  "target/macos/bin/rustboardd": "0965bfe2e46315bb72aaad3c4e2da6765e9e1aa24aec6aa2d716766d217faf6c",
-  "target/macos/Rustboard.app/Contents/PlugIns/RustboardProvider.appex/Contents/MacOS/RustboardProvider": "3e96242cc90b557975b7d537cf55d8a90239913786bae65056c1a57f818114e9",
-  "native/macos/Wire.swift": "7b8074a01d9bb07d432e897657471888703eae3cb37fd21bb417539968043669",
-  "crates/rustboard-core/src/transport.rs": "835c8954d4e34c95a5d2f9c32a2978f6edbb20d4f14f409127a2c6325e056480"
-}

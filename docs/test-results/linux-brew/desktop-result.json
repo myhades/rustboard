@@ -1,6 +1,0 @@
-{
-  "install_and_pair_do_not_initialize": true,
-  "first_start_initializes_identity_and_enables_service": true,
-  "upgrade_preserves_identity_and_explicit_start_works": true,
-  "uninstall_running_service_stops_and_unregisters_retains_config": true
-}

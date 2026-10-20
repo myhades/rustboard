@@ -165,8 +165,11 @@ impl Node {
         config.alpn_protocols = vec![ALPN_V2.to_vec()];
         config.ignore_client_order = prefer_server;
         let mut stream = StreamOwned::new(ServerConnection::new(Arc::new(config))?, socket);
-        while stream.conn.is_handshaking() {
-            stream.conn.complete_io(&mut stream.sock)?;
+        {
+            let mut io = tls::HandshakeIo::new(&mut stream.sock);
+            while stream.conn.is_handshaking() {
+                stream.conn.complete_io(&mut io)?;
+            }
         }
         ensure!(
             matches!(stream.conn.alpn_protocol(), Some(ALPN_V2)),

@@ -98,7 +98,16 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                             .checked_add(1)
                             .ok_or_else(|| anyhow::anyhow!("pairing port overflow"))?,
                     );
-                    (pairing::connect(&node.identity, a)?, a.ip())
+                    let sock = TcpStream::connect_timeout(&a, Duration::from_secs(3))?;
+                    {
+                        let mut s = state.lock().unwrap();
+                        ensure!(alive(&s), "pairing cancelled or expired");
+                        s.socket = Some(sock.try_clone()?);
+                    }
+                    (
+                        pairing::connect(&node.identity, sock, &|| alive(&state.lock().unwrap()))?,
+                        a.ip(),
+                    )
                 } else {
                     let l = listener.unwrap();
                     loop {
@@ -108,7 +117,17 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                         );
                         match l.accept() {
                             Ok((sock, a)) => {
-                                break (pairing::accept(&node.identity, sock)?, a.ip());
+                                {
+                                    let mut s = state.lock().unwrap();
+                                    ensure!(alive(&s), "pairing cancelled or expired");
+                                    s.socket = Some(sock.try_clone()?);
+                                }
+                                break (
+                                    pairing::accept(&node.identity, sock, &|| {
+                                        alive(&state.lock().unwrap())
+                                    })?,
+                                    a.ip(),
+                                );
                             }
                             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                                 std::thread::sleep(Duration::from_millis(100))
@@ -117,9 +136,6 @@ pub fn control(node: &Arc<Node>, dir: &Path, args: &[String]) -> Result<Value> {
                         }
                     }
                 };
-                {
-                    state.lock().unwrap().socket = Some(ch.socket.try_clone()?);
-                }
                 ch.send(u64::from(own.port()))?;
                 let port = u16::try_from(ch.receive(|| alive(&state.lock().unwrap()))?)?;
                 ensure!(port > 0, "invalid advertised port");

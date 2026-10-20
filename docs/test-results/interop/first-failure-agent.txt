@@ -1,5 +1,0 @@
-native text publication complete
-local offer published content_bytes_read=0
-local offer published content_bytes_read=0
-native file publication complete
-File Provider: File Provider failure domain=Rustboard.WireError code=1

@@ -255,3 +255,33 @@ fn source_failure_mid_window_does_not_return_partial_data() {
     a.stop.store(true, Ordering::Release);
     server.join().unwrap();
 }
+
+#[test]
+fn peer_connection_tracks_sync_success_and_failure() {
+    let a = Node::new(Identity::generate().unwrap(), vec![]);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let peer = Peer {
+        address: listener.local_addr().unwrap(),
+        fingerprint: a.identity.pin(),
+    };
+    let b = Node::new(Identity::generate().unwrap(), vec![peer.clone()]);
+    assert_eq!(b.peer_connection(peer.address), None);
+    a.peers.lock().unwrap().push(Peer {
+        address: "127.0.0.1:1".parse().unwrap(),
+        fingerprint: b.identity.pin(),
+    });
+    let server = a.serve(listener).unwrap();
+    b.start_sync();
+    let wait = |expected| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while b.peer_connection(peer.address) != Some(expected) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(b.peer_connection(peer.address), Some(expected));
+    };
+    wait(true);
+    a.stop.store(true, Ordering::Release);
+    server.join().unwrap();
+    wait(false);
+    b.stop.store(true, Ordering::Release);
+}

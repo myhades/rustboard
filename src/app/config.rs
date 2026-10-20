@@ -206,8 +206,22 @@ pub fn save_peer(dir: &Path, own_pin: &str, peer: Peer) -> Result<()> {
 pub fn status(node: &crate::core::transport::Node, dir: &Path) -> Result<Value> {
     let desired = load(dir)?;
     let active = ACTIVE.get();
+    let peers: Vec<_> = node
+        .peers
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|peer| {
+            let status = match node.peer_connection(peer.address) {
+                Some(true) => "connected",
+                Some(false) => "disconnected",
+                None => "connecting",
+            };
+            json!({"address":peer.address,"fingerprint":peer.fingerprint,"status":status})
+        })
+        .collect();
     Ok(
-        json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"fingerprint":node.identity.pin(),"device_id":node.identity.device(),"mode":if node.engine.lock().unwrap().text_only{"text"}else{"all"},"listen":active.map(|v| &v["listen"]),"peers":*node.peers.lock().unwrap(),"pending_restart":active.is_some_and(|v|v!=&desired)}),
+        json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"fingerprint":node.identity.pin(),"device_id":node.identity.device(),"mode":if node.engine.lock().unwrap().text_only{"text"}else{"all"},"listen":active.map(|v| &v["listen"]),"peers":peers,"pending_restart":active.is_some_and(|v|v!=&desired)}),
     )
 }
 pub fn unpair_ip(dir: &Path, address: std::net::IpAddr) -> Result<()> {

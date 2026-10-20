@@ -194,8 +194,16 @@ fn print_peers(peers: &Value) {
     let peers = peers.as_array();
     println!("\nPeers ({})", peers.map_or(0, Vec::len));
     if let Some(peers) = peers.filter(|p| !p.is_empty()) {
+        let width = peers
+            .iter()
+            .filter_map(|p| p["address"].as_str())
+            .map(str::len)
+            .max()
+            .unwrap_or(0);
         for p in peers {
-            println!("  {}", p["address"].as_str().unwrap_or("?"));
+            let address = p["address"].as_str().unwrap_or("?");
+            let status = p["status"].as_str().unwrap_or("unknown");
+            println!("  {address:width$}  {status}");
         }
     }
 }

@@ -44,6 +44,7 @@ pub struct Node {
     /// Only the latest accepted offer is queued: bounded even if clipboard STA is busy.
     pub incoming: Mutex<Option<(Offer, Peer)>>,
     active: AtomicUsize,
+    peer_connections: Mutex<std::collections::HashMap<SocketAddr, bool>>,
     // Bounded transport cache only: no file bytes, and every IPC read reauthorizes.
     ipc_connections: Mutex<Vec<(IpcSourceKey, SharedConnection)>>,
 }
@@ -56,6 +57,7 @@ impl Node {
             stop: AtomicBool::new(false),
             incoming: Mutex::new(None),
             active: AtomicUsize::new(0),
+            peer_connections: Mutex::new(std::collections::HashMap::new()),
             ipc_connections: Mutex::new(Vec::new()),
         })
     }
@@ -368,6 +370,9 @@ impl Node {
         }
         Ok(())
     }
+    pub fn peer_connection(&self, address: SocketAddr) -> Option<bool> {
+        self.peer_connections.lock().unwrap().get(&address).copied()
+    }
     pub fn start_sync(self: &Arc<Self>) {
         let node = self.clone();
         std::thread::spawn(move || {
@@ -375,11 +380,20 @@ impl Node {
             while !node.stop.load(Ordering::Acquire) {
                 let peers = node.peers.lock().unwrap().clone();
                 failures.retain(|address, _| peers.iter().any(|p| p.address == *address));
+                node.peer_connections
+                    .lock()
+                    .unwrap()
+                    .retain(|address, _| peers.iter().any(|p| p.address == *address));
                 for peer in peers {
                     if node.stop.load(Ordering::Acquire) {
                         break;
                     }
-                    match node.sync_once(&peer) {
+                    let result = node.sync_once(&peer);
+                    node.peer_connections
+                        .lock()
+                        .unwrap()
+                        .insert(peer.address, result.is_ok());
+                    match result {
                         Ok(()) => {
                             if failures.remove(&peer.address).is_some() {
                                 log::info!(target: "network", "peer {} reconnected", peer.address);

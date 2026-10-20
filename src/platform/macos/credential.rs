@@ -14,10 +14,7 @@ unsafe extern "C" {
 pub fn store(account: &str, key: &[u8]) -> Result<Value> {
     let name = CString::new(account)?;
     let status = unsafe { rb_keychain_store(name.as_ptr(), key.as_ptr(), key.len()) };
-    ensure!(
-        status == 0,
-        "Keychain store failed (OSStatus {status}); identity initialization not committed"
-    );
+    ensure!(status == 0, "keychain store failed (OSStatus {status})");
     Ok(json!({"provider":"macos-keychain","account":account}))
 }
 pub fn load(reference: &Value) -> Result<Vec<u8>> {
@@ -39,7 +36,7 @@ pub fn load(reference: &Value) -> Result<Vec<u8>> {
         unsafe { rb_keychain_load(name.as_ptr(), key.as_mut_ptr(), key.len(), &mut length) };
     ensure!(
         status == 0 && length > 0 && length <= key.len(),
-        "Keychain read failed (OSStatus {status}); unlock login Keychain and restart; no replacement identity generated"
+        "keychain read failed (OSStatus {status})"
     );
     key.truncate(length);
     Ok(key)

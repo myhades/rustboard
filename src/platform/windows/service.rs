@@ -51,7 +51,7 @@ pub fn enabled() -> Result<bool> {
 pub fn start(register: bool) -> Result<()> {
     let base = base()?;
     let agent = base.join("bin/rustboardd.exe");
-    ensure!(agent.is_file(), "Rustboard is not installed");
+    ensure!(agent.is_file(), "agent is not installed");
     if register {
         let value: Vec<u16> = format!("\"{}\"", agent.display())
             .encode_utf16()
@@ -88,9 +88,7 @@ pub fn start(register: bool) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    anyhow::bail!(
-        "Agent did not start; inspect logs in the profile directory (login startup may remain enabled)"
-    )
+    anyhow::bail!("agent failed to start")
 }
 pub fn stop(unregister: bool) -> Result<()> {
     let agent = base()?.join("bin/rustboardd.exe");
@@ -162,7 +160,7 @@ pub fn stop(unregister: bool) -> Result<()> {
             .as_millis() as u32;
         match unsafe { WaitForSingleObject(HANDLE(process.as_raw_handle()), timeout) } {
             WAIT_OBJECT_0 => {}
-            WAIT_TIMEOUT => anyhow::bail!("Agent did not stop"),
+            WAIT_TIMEOUT => anyhow::bail!("agent failed to stop"),
             _ => return Err(windows::core::Error::from_win32().into()),
         }
     }

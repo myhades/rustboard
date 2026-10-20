@@ -69,7 +69,14 @@ fn authenticate(stream: &UnixStream) -> Result<()> {
     Ok(())
 }
 pub fn request(args: Vec<String>) -> Result<serde_json::Value> {
-    let mut stream = UnixStream::connect(data_dir()?.join("agent.sock"))?;
+    let mut stream = UnixStream::connect(data_dir()?.join("agent.sock")).map_err(|error| {
+        match error.kind() {
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => {
+                anyhow::anyhow!("agent unavailable")
+            }
+            _ => error.into(),
+        }
+    })?;
     authenticate(&stream)?;
     write_frame(
         &mut stream,
@@ -102,7 +109,7 @@ impl Server {
             .open(dir.join("agent.lock"))?;
         ensure!(
             unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
-            "Agent already running"
+            "agent already running"
         );
         let path = dir.join("agent.sock");
         if let Ok(m) = fs::symlink_metadata(&path) {

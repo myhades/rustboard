@@ -231,7 +231,7 @@ pub fn unpair_ip(dir: &Path, address: std::net::IpAddr) -> Result<()> {
     let mut next = peers(&value)?;
     ensure!(
         next.iter().any(|p| p.address.ip() == address),
-        "no paired device at {address}; inspect status/config"
+        "no paired device at {address}"
     );
     next.retain(|p| p.address.ip() != address);
     value["peers"] = serde_json::to_value(next)?;

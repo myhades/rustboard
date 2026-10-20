@@ -68,7 +68,7 @@ pub fn store(account: &str, key: &[u8]) -> Result<Value> {
             ptr::write_volatile(byte, 0);
         }
     }
-    ensure!(ok != 0, "cannot save identity; unlock the desktop keyring");
+    ensure!(ok != 0, "cannot save identity");
     Ok(json!({"provider":"secret-service","account":account}))
 }
 pub fn load(reference: &Value) -> Result<Vec<u8>> {
@@ -106,10 +106,7 @@ pub fn load(reference: &Value) -> Result<Vec<u8>> {
         if !error.is_null() {
             g_error_free(error);
         }
-        ensure!(
-            !value.is_null(),
-            "identity unavailable; unlock the desktop keyring"
-        );
+        ensure!(!value.is_null(), "identity unavailable");
         let result = STANDARD.decode(CStr::from_ptr(value).to_bytes());
         secret_password_free(value);
         Ok(result?)

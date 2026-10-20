@@ -47,7 +47,7 @@ pub fn start(register: bool) -> Result<()> {
     let app = home.join("Applications/Rustboard.app");
     ensure!(
         base.join("bin/rustboardd").is_file() && app.join("Contents/MacOS/Rustboard").is_file(),
-        "Rustboard is not installed"
+        "agent is not installed"
     );
     if crate::app::cli::request(&["status"]).is_err() {
         let output = Command::new("/usr/bin/pluginkit")
@@ -107,7 +107,7 @@ pub fn start(register: bool) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    anyhow::bail!("Agent did not start; inspect logs in the profile directory")
+    anyhow::bail!("agent failed to start")
 }
 pub fn stop(unregister: bool) -> Result<()> {
     plist()?;
@@ -128,7 +128,7 @@ pub fn stop(unregister: bool) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    anyhow::bail!("Agent did not stop")
+    anyhow::bail!("agent failed to stop")
 }
 pub fn edit(path: &Path) -> Result<()> {
     if let Ok(editor) = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")) {

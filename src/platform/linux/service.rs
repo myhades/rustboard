@@ -44,7 +44,7 @@ pub fn start(register: bool) -> Result<()> {
         .parent()
         .unwrap()
         .join("rustboardd");
-    ensure!(agent.is_file(), "Agent is not installed");
+    ensure!(agent.is_file(), "agent is not installed");
     let home = config_home()?;
     let units = home.join("systemd/user");
     std::fs::create_dir_all(&units)?;
@@ -95,7 +95,7 @@ pub fn start(register: bool) -> Result<()> {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    anyhow::bail!("Agent did not start; inspect the profile logs")
+    anyhow::bail!("agent failed to start")
 }
 pub fn stop(unregister: bool) -> Result<()> {
     ensure!(

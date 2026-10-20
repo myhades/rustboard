@@ -80,19 +80,49 @@ pub fn data_dir() -> Result<PathBuf> {
 pub fn prepare_dir() -> Result<PathBuf> {
     let dir = data_dir()?;
     std::fs::create_dir_all(&dir)?;
-    // Restrict inherited permissions BEFORE storing identity material. icacls is a system tool.
-    use std::os::windows::process::CommandExt;
-    let status = std::process::Command::new("icacls.exe")
-        .arg(&dir)
-        .args(["/inheritance:r", "/grant:r"])
-        .arg(format!("*{}:(OI)(CI)F", user_sid()?))
-        .creation_flags(0x08000000)
-        .output()?;
-    ensure!(
-        status.status.success(),
-        "cannot protect configuration directory"
-    );
+    protect_profile(&dir)?;
     Ok(dir)
+}
+fn protect_profile(dir: &std::path::Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    let sddl = wide(&format!("D:P(A;OICI;FA;;;{})", user_sid()?));
+    unsafe {
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(sddl.as_ptr()),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            None,
+        )?;
+        let result = (|| -> Result<()> {
+            let mut present = false.into();
+            let mut defaulted = false.into();
+            let mut dacl = std::ptr::null_mut();
+            GetSecurityDescriptorDacl(descriptor, &mut present, &mut dacl, &mut defaulted)?;
+            // Replace the complete DACL, including explicit grants on existing state files.
+            // The encrypted identity is stored in config.json.
+            for name in ["", "config.json", "config.lock", "clock.json"] {
+                let path = dir.join(name);
+                let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+                let status = SetNamedSecurityInfoW(
+                    PCWSTR(path.as_ptr()),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                    None,
+                    None,
+                    Some(dacl),
+                    None,
+                );
+                if !name.is_empty() && status == ERROR_FILE_NOT_FOUND {
+                    continue;
+                }
+                status.ok()?;
+            }
+            Ok(())
+        })();
+        let _ = LocalFree(Some(HLOCAL(descriptor.0)));
+        result
+    }
 }
 fn pipe_name() -> Result<Vec<u16>> {
     Ok(wide(&format!(
@@ -194,7 +224,7 @@ pub fn request(args: Vec<String>) -> Result<serde_json::Value> {
                 std::thread::sleep(Duration::from_millis(20));
             }
             Err(error) if error.code() == ERROR_FILE_NOT_FOUND.to_hresult() => {
-                anyhow::bail!("Agent unavailable; run 'rustboard start'");
+                anyhow::bail!("agent unavailable");
             }
             Err(error) => return Err(error.into()),
         }
@@ -249,7 +279,7 @@ impl Server {
             let _ = LocalFree(Some(HLOCAL(descriptor.0)));
             ensure!(
                 !h.is_invalid(),
-                "Agent already running or pipe unavailable: {}",
+                "agent already running or pipe unavailable: {}",
                 windows::core::Error::from_win32()
             );
             Ok(Self {
@@ -318,6 +348,92 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn dacl_text(path: &std::path::Path) -> String {
+        use std::os::windows::ffi::OsStrExt;
+        let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        unsafe {
+            let mut descriptor = PSECURITY_DESCRIPTOR::default();
+            GetNamedSecurityInfoW(
+                PCWSTR(path.as_ptr()),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                None,
+                None,
+                &mut descriptor,
+            )
+            .ok()
+            .unwrap();
+            let mut text = PWSTR::null();
+            let result = ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                SDDL_REVISION_1,
+                DACL_SECURITY_INFORMATION,
+                &mut text,
+                None,
+            );
+            let _ = LocalFree(Some(HLOCAL(descriptor.0)));
+            result.unwrap();
+            let value = text.to_string();
+            let _ = LocalFree(Some(HLOCAL(text.0.cast())));
+            value.unwrap()
+        }
+    }
+    #[test]
+    fn profile_acl_replaces_explicit_grants_and_protects_new_files() {
+        use std::os::windows::ffi::OsStrExt;
+        let dir = std::env::temp_dir().join(format!("rustboard-acl-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        // Fresh initialization must also work before state files exist.
+        protect_profile(&dir).unwrap();
+        let sid = user_sid().unwrap();
+        for name in ["config.json", "config.lock", "clock.json"] {
+            std::fs::write(dir.join(name), b"unchanged").unwrap();
+        }
+        let sddl = wide(&format!("D:P(A;OICI;FA;;;{sid})(A;OICI;FA;;;WD)"));
+        unsafe {
+            let mut descriptor = PSECURITY_DESCRIPTOR::default();
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                PCWSTR(sddl.as_ptr()),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                None,
+            )
+            .unwrap();
+            for name in ["", "config.json", "config.lock", "clock.json"] {
+                let path = dir.join(name);
+                let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+                assert!(
+                    SetFileSecurityW(
+                        PCWSTR(path.as_ptr()),
+                        DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                        descriptor,
+                    )
+                    .as_bool()
+                );
+            }
+            let _ = LocalFree(Some(HLOCAL(descriptor.0)));
+        }
+        assert!(dacl_text(&dir.join("config.json")).contains(";;;WD)"));
+        protect_profile(&dir).unwrap();
+        protect_profile(&dir).unwrap();
+        for name in ["", "config.json", "config.lock", "clock.json"] {
+            let acl = dacl_text(&dir.join(name));
+            assert!(acl.starts_with("D:P"), "{acl}");
+            assert_eq!(acl.matches('(').count(), 1, "{acl}");
+            assert!(acl.contains(&format!(";;;{sid})")), "{acl}");
+            if !name.is_empty() {
+                assert_eq!(std::fs::read(dir.join(name)).unwrap(), b"unchanged");
+            }
+        }
+        let new_file = dir.join("new.tmp");
+        std::fs::write(&new_file, b"new").unwrap();
+        let acl = dacl_text(&new_file);
+        assert_eq!(acl.matches('(').count(), 1, "{acl}");
+        assert!(acl.contains(&format!(";;;{sid})")), "{acl}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn pipe_server_identity_is_checked() {
         unsafe {

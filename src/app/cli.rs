@@ -18,7 +18,7 @@ pub fn request(args: &[&str]) -> Result<Value> {
     ensure!(
         v["ok"] == true,
         "{}",
-        v["error"].as_str().unwrap_or("Agent command failed")
+        v["error"].as_str().unwrap_or("agent command failed")
     );
     Ok(v)
 }
@@ -30,6 +30,12 @@ pub fn address(s: &str) -> Result<SocketAddr> {
     };
     ensure!(a.port() > 0 && a.port() < 65535, "port must be 1..65534");
     Ok(a)
+}
+fn unpair_address(value: &str) -> Result<IpAddr> {
+    value
+        .parse::<IpAddr>()
+        .or_else(|_| value.parse::<SocketAddr>().map(|address| address.ip()))
+        .map_err(|_| anyhow::anyhow!("invalid IP address"))
 }
 fn group(pin: &str) -> String {
     pin.as_bytes()
@@ -44,11 +50,11 @@ fn config_path() -> Result<PathBuf> {
 pub fn run(args: Vec<String>) -> Result<()> {
     let cmd = args.first().map(String::as_str).unwrap_or("help");
     if cmd == "help" {
-        ensure!(args.len() <= 2, "usage: rustboard help [COMMAND]");
+        ensure!(args.len() <= 2, "unexpected arguments");
         return help(args.get(1).map(String::as_str));
     }
     if cmd == "version" {
-        ensure!(args.len() == 1, "usage: rustboard version");
+        ensure!(args.len() == 1, "unexpected arguments");
         println!("rustboard {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
@@ -61,11 +67,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
             cmd,
             "status" | "start" | "stop" | "restart" | "config" | "log" | "pair" | "unpair"
         ),
-        "unknown command '{cmd}'; run 'rustboard help'"
+        "unknown command '{cmd}'"
     );
     ensure!(
         args.len() == 1 || (matches!(cmd, "pair" | "unpair") && args.len() == 2),
-        "unexpected arguments; run 'rustboard help {cmd}'"
+        "unexpected arguments"
     );
     match cmd {
         "status" => {
@@ -94,20 +100,13 @@ pub fn run(args: Vec<String>) -> Result<()> {
             service::stop(true)?;
         }
         "restart" => {
-            ensure!(
-                service::enabled()?,
-                "service is disabled; use start to enable it"
-            );
+            ensure!(service::enabled()?, "service is disabled");
             service::stop(false)?;
             service::start(false)?;
         }
         "config" => {
             let p = config_path()?;
-            ensure!(
-                p.is_file(),
-                "configuration not found: {}; run 'rustboard start' first",
-                p.display()
-            );
+            ensure!(p.is_file(), "configuration not found");
             service::edit(&p)?;
             println!("{}", p.display());
         }
@@ -118,18 +117,16 @@ pub fn run(args: Vec<String>) -> Result<()> {
             service::edit(&p)?;
         }
         "unpair" => {
-            ensure!(args.len() == 2, "usage: rustboard unpair IP");
-            let a: IpAddr = args[1].parse().map_err(|_| {
-                anyhow::anyhow!(
-                    "expected an IP address without a port; run 'rustboard help unpair'"
-                )
-            })?;
+            ensure!(args.len() == 2, "missing IP address");
+            let a = unpair_address(&args[1])?;
             if request(&["status"]).is_ok() {
                 request(&["unpair-ip", &a.to_string()])?;
+                service::stop(false)?;
+                service::start(false)?;
             } else {
                 crate::app::config::unpair_ip(&ipc::data_dir()?, a)?;
             }
-            println!("Removed {a}. Restart to revoke existing trust.");
+            println!("Peer removed.");
         }
         "pair" => pair(args.get(1).map(String::as_str))?,
         _ => unreachable!(),
@@ -152,7 +149,7 @@ Commands:
   config              Open the configuration in your text editor
   log                 Open the current log in your text editor
   pair [IP[:PORT]]    Wait for pairing or connect to a peer (default port: 45452)
-  unpair IP           Remove pairing for an IP address
+  unpair IP[:PORT]    Remove pairing for an IP address
   help [COMMAND]      Show help for all commands or a specific command
   version             Show the installed CLI version
 
@@ -162,7 +159,7 @@ Run 'rustboard help COMMAND' for command details."
     };
     let detail = match command {
         "status" => {
-            "status [--json]\n\nShow service state, listen address, mode and peers.\nPeer entries show saved trust, not connection status.\nWith --json, print the Agent response; fail if the Agent is unavailable."
+            "status [--json]\n\nShow service state, listen address, mode and peers.\nPeer entries show the latest connection status.\nWith --json, print the agent response and fail if the agent is unavailable."
         }
         "start" => "start\n\nStart the service now and enable automatic startup at login.",
         "stop" => {
@@ -181,11 +178,11 @@ Run 'rustboard help COMMAND' for command details."
             "pair [IP[:PORT]]\n\nWithout an address, wait for an incoming pairing request. With an address,\nconnect to that peer; the default port is 45452. Use [IPv6]:PORT for IPv6\nwith an explicit port. Compare fingerprints on both peers before accepting.\nBoth services must be running. Each service restarts after pairing succeeds."
         }
         "unpair" => {
-            "unpair IP\n\nRemove all saved pairings at the specified IPv4 or IPv6 address. Do not\ninclude a port. Restart the service to revoke existing trust.\nTo revoke access immediately, stop the service before removing the pairing."
+            "unpair IP[:PORT]\n\nRemove all saved pairings at the specified IPv4 or IPv6 address.\nAn optional port is ignored."
         }
         "help" => "help [COMMAND]\n\nShow the command list or help for one command.",
         "version" => "version\n\nShow the version of this CLI executable.",
-        _ => anyhow::bail!("unknown command '{command}'; run 'rustboard help'"),
+        _ => anyhow::bail!("unknown command '{command}'"),
     };
     println!("Usage: rustboard {detail}");
     Ok(())
@@ -315,7 +312,20 @@ fn accept_pairing(reader: &mut impl io::BufRead) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::accept_pairing;
+    use super::{accept_pairing, unpair_address};
+    #[test]
+    fn unpair_ignores_optional_port() {
+        for (input, expected) in [
+            ("192.168.1.2", "192.168.1.2"),
+            ("192.168.1.2:45452", "192.168.1.2"),
+            ("192.168.1.2:65535", "192.168.1.2"),
+            ("::1", "::1"),
+            ("[::1]:45452", "::1"),
+        ] {
+            assert_eq!(unpair_address(input).unwrap().to_string(), expected);
+        }
+        assert!(unpair_address("hostname").is_err());
+    }
     #[test]
     fn pairing_requires_explicit_approval() {
         for input in ["y\n", "YES\n"] {

@@ -139,21 +139,21 @@ fn help(command: Option<&str>) -> Result<()> {
             "\
 Synchronize the clipboard between paired computers.
 
-Usage: rustboard COMMAND [ARGUMENTS]
+Usage: rustboard <COMMAND> [ARGUMENTS]
 
 Commands:
-  status [--json]     Show service state and peers
-  start               Start the service and enable login startup
-  stop                Stop the service and disable login startup
-  restart             Restart the service and apply saved configuration
-  config              Open the configuration in your text editor
-  log                 Open the current log in your text editor
-  pair [IP[:PORT]]    Wait for pairing or connect to a peer (default port: 45452)
-  unpair IP[:PORT]    Remove pairing for an IP address
-  help [COMMAND]      Show help for all commands or a specific command
-  version             Show the installed CLI version
+  status [--json]        Show service state and peers
+  start                  Start the service and enable login startup
+  stop                   Stop the service and disable login startup
+  restart                Restart the service and apply saved configuration
+  config                 Open the configuration in your text editor
+  log                    Open the current log in your text editor
+  pair [<IP>[:<PORT>]]   Wait for pairing or connect to a peer
+  unpair <IP>[:<PORT>]   Remove pairing for an IP address
+  help [<COMMAND>]       Show help for all commands or a specific command
+  version                Show the installed CLI version
 
-Run 'rustboard help COMMAND' for command details."
+Run 'rustboard help <COMMAND>' for command details."
         );
         return Ok(());
     };
@@ -166,7 +166,7 @@ Run 'rustboard help COMMAND' for command details."
             "stop\n\nStop the service now and disable automatic startup at login.\nKeep configuration, device identity and peers."
         }
         "restart" => {
-            "restart\n\nRestart the service to apply configuration and pairing changes.\nActive transfers are interrupted. A disabled service requires 'rustboard start'."
+            "restart\n\nRestart the service to apply saved configuration.\nActive transfers are interrupted. A disabled service requires 'rustboard start'."
         }
         "config" => {
             "config\n\nOpen the existing configuration using VISUAL, then EDITOR, or the system\ntext editor. VISUAL and EDITOR must name an executable.\nSave your changes, then run 'rustboard restart' to apply them."
@@ -175,12 +175,12 @@ Run 'rustboard help COMMAND' for command details."
             "log\n\nPrint the current log file path and open it using VISUAL, then EDITOR,\nor the system text editor. VISUAL and EDITOR must name an executable."
         }
         "pair" => {
-            "pair [IP[:PORT]]\n\nWithout an address, wait for an incoming pairing request. With an address,\nconnect to that peer; the default port is 45452. Use [IPv6]:PORT for IPv6\nwith an explicit port. Compare fingerprints on both peers before accepting.\nBoth services must be running. Each service restarts after pairing succeeds."
+            "pair [<IP>[:<PORT>]]\n\nWithout an address, wait for an incoming pairing request. With an address,\nconnect to that peer. Use [IPv6]:PORT for IPv6\nwith an explicit port. Compare fingerprints on both peers before accepting.\nBoth services must be running. Each service restarts after pairing succeeds."
         }
         "unpair" => {
-            "unpair IP[:PORT]\n\nRemove all saved pairings at the specified IPv4 or IPv6 address.\nAn optional port is ignored."
+            "unpair <IP>[:<PORT>]\n\nRemove all saved pairings at the specified IPv4 or IPv6 address.\nAn optional port is ignored."
         }
-        "help" => "help [COMMAND]\n\nShow the command list or help for one command.",
+        "help" => "help [<COMMAND>]\n\nShow the command list or help for one command.",
         "version" => "version\n\nShow the version of this CLI executable.",
         _ => anyhow::bail!("unknown command '{command}'"),
     };

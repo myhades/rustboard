@@ -1,7 +1,4 @@
-use crate::core::{
-    Content, FileEntry, ReadAt,
-    engine::{Engine, new_id},
-};
+use crate::core::{Content, ReadAt, engine::Engine};
 use anyhow::{Result, ensure};
 use std::{
     collections::HashMap,
@@ -100,28 +97,64 @@ fn transfer_lock(file: &std::fs::File) -> Result<std::fs::File> {
     };
     Ok(unsafe { std::fs::File::from_raw_handle(handle.0) })
 }
+struct FilePath {
+    path: PathBuf,
+    identity: (u32, u64),
+    version: String,
+    size: u64,
+}
+fn file_identity(file: &File) -> Result<(u32, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::{
+        Foundation::HANDLE,
+        Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle},
+    };
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    unsafe {
+        GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info)?;
+    }
+    Ok((
+        info.dwVolumeSerialNumber,
+        ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64,
+    ))
+}
+impl ReadAt for FilePath {
+    fn len(&self) -> u64 {
+        self.size
+    }
+    fn open_reader(&self) -> Result<Option<Arc<dyn ReadAt>>> {
+        let source = open(&self.path)?;
+        ensure!(
+            source.version() == self.version
+                && file_identity(&source.source.file.lock().unwrap())? == self.identity,
+            "version_changed"
+        );
+        Ok(Some(Arc::new(source)))
+    }
+    fn read_at(&self, offset: u64, buffer: &mut [u8]) -> Result<usize> {
+        self.open_reader()?.unwrap().read_at(offset, buffer)
+    }
+}
 pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>) -> Result<()> {
-    ensure!(
-        !paths.is_empty() && paths.len() <= crate::core::MAX_FILES,
-        "invalid file count"
-    );
     let mut files = Vec::new();
     let mut sources: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
-    for path in paths {
-        let source = Arc::new(open(&path)?);
-        let id = new_id();
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| anyhow::anyhow!("invalid filename"))?;
-        files.push(FileEntry {
-            file_id: id.clone(),
-            relative_path: name.to_string(),
-            size: Some(source.len()),
-            version: source.version(),
-            media_type: "application/octet-stream".into(),
-        });
-        sources.insert(id, source);
+    for (path, mut entry) in crate::core::files::manifest(paths)? {
+        if !entry.directory {
+            let source = open(&path)?;
+            entry.version = source.version();
+            entry.size = Some(source.len());
+            let identity = file_identity(&source.source.file.lock().unwrap())?;
+            sources.insert(
+                entry.file_id.clone(),
+                Arc::new(FilePath {
+                    path,
+                    identity,
+                    version: entry.version.clone(),
+                    size: source.len(),
+                }),
+            );
+        }
+        files.push(entry);
     }
     engine.local(Content::Files { files }, sources)?;
     Ok(())
@@ -156,6 +189,7 @@ fn background_state(file: &std::fs::File) -> Result<(Vec<u16>, i64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::engine::new_id;
     #[test]
     fn background_tls_read_allows_rename_and_rejects_changed_source() {
         use crate::core::transport::{Identity, Node, Peer};
@@ -237,15 +271,17 @@ mod tests {
         let server = a.serve(listener).unwrap();
         b.sync_once(&peer).unwrap();
         std::fs::rename(&path, &moved).unwrap();
-        let source = RemoteSource::new(b, peer, manifest, file);
+        std::fs::rename(&moved, &path).unwrap();
+        let source = RemoteSource::new(b, peer, manifest.offer_id.clone(), file);
         let mut bytes = [0; 4];
         source.read_at(0, &mut bytes).unwrap();
         assert_eq!(&bytes, b"abcd");
-        assert!(std::fs::rename(&moved, &path).is_err());
-        assert!(std::fs::write(&moved, b"changed").is_err());
-        assert!(std::fs::remove_file(&moved).is_err());
+        assert!(std::fs::rename(&path, &moved).is_err());
+        assert!(std::fs::write(&path, b"changed").is_err());
+        assert!(std::fs::remove_file(&path).is_err());
         source.read_at(4, &mut bytes).unwrap();
         assert_eq!(&bytes, b"efgh");
+        std::fs::rename(&path, &moved).unwrap();
         std::fs::rename(&moved, &path).unwrap();
         drop(source);
         a.stop.store(true, Ordering::Release);

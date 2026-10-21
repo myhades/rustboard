@@ -43,6 +43,9 @@ fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
     let source = Arc::new(PatternSource::new(READ_WINDOW as u64 * 3));
     let id = engine::new_id();
     let file = FileEntry {
+        directory: false,
+        modified_ms: None,
+        executable: None,
         file_id: id.clone(),
         relative_path: "test.bin".into(),
         size: Some(source.len()),
@@ -63,7 +66,7 @@ fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
     let server = a.serve(listener).unwrap();
     b.sync_once(&peer).unwrap();
     assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
-    let remote = RemoteSource::new(b.clone(), peer, offer, file);
+    let remote = RemoteSource::new(b.clone(), peer, offer.offer_id.clone(), file);
     remote.read_at(0, &mut [0; 4096]).unwrap();
     assert_eq!(source.bytes_read.load(Ordering::Relaxed), 4096);
     a.engine
@@ -72,6 +75,8 @@ fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
         .local(
             Content::Text {
                 text: "source changed".into(),
+                html: None,
+                rtf: None,
             },
             Default::default(),
         )
@@ -83,6 +88,8 @@ fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
         .local(
             Content::Text {
                 text: "receiver changed".into(),
+                html: None,
+                rtf: None,
             },
             Default::default(),
         )
@@ -139,6 +146,9 @@ fn mutual_tls_offer_lazy_read_and_untrusted_rejection() {
     let source = Arc::new(PatternSource::new(4096));
     let id = engine::new_id();
     let file = FileEntry {
+        directory: false,
+        modified_ms: None,
+        executable: None,
         file_id: id.clone(),
         relative_path: "sample.bin".into(),
         size: Some(4096),
@@ -168,7 +178,12 @@ fn mutual_tls_offer_lazy_read_and_untrusted_rejection() {
         offset: 250,
         length: 100,
     };
-    let remote = RemoteSource::new(b.clone(), peer.clone(), offer.clone(), file.clone());
+    let remote = RemoteSource::new(
+        b.clone(),
+        peer.clone(),
+        offer.offer_id.clone(),
+        file.clone(),
+    );
     let mut bytes = [0; 100];
     assert_eq!(remote.read_at(250, &mut bytes).unwrap(), 100);
     assert_eq!(&bytes[..3], &[250, 0, 1]);
@@ -225,6 +240,9 @@ fn source_failure_mid_window_does_not_return_partial_data() {
     let source = Arc::new(FailingSource);
     let id = engine::new_id();
     let file = FileEntry {
+        directory: false,
+        modified_ms: None,
+        executable: None,
         file_id: id.clone(),
         relative_path: "test.bin".into(),
         size: Some(source.len()),
@@ -244,7 +262,7 @@ fn source_failure_mid_window_does_not_return_partial_data() {
         .unwrap();
     let server = a.serve(listener).unwrap();
     b.sync_once(&peer).unwrap();
-    let remote = RemoteSource::new(b.clone(), peer, offer, file);
+    let remote = RemoteSource::new(b.clone(), peer, offer.offer_id.clone(), file);
     remote.read_at(0, &mut [0; MAX_CHUNK]).unwrap();
 
     let mut bytes = [99; MAX_CHUNK];

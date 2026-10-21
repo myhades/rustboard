@@ -7,5 +7,7 @@ pub mod windows;
 
 pub struct PresentedFile {
     pub name: String,
+    pub directory: bool,
+    pub modified_ms: Option<u64>,
     pub source: std::sync::Arc<dyn crate::core::ReadAt>,
 }

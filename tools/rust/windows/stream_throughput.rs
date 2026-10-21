@@ -41,6 +41,9 @@ fn main() -> anyhow::Result<()> {
     let source = Arc::new(PatternSource::new(size));
     let id = new_id();
     let file = FileEntry {
+        directory: false,
+        modified_ms: None,
+        executable: None,
         file_id: id.clone(),
         relative_path: "pattern.bin".into(),
         size: Some(size),
@@ -64,8 +67,15 @@ fn main() -> anyhow::Result<()> {
             }
         }
         let _ole = OleGuard;
-        let remote = Arc::new(RemoteSource::new(b.clone(), peer, offer, file));
+        let remote = Arc::new(RemoteSource::new(
+            b.clone(),
+            peer,
+            offer.offer_id.clone(),
+            file,
+        ));
         let object = create(vec![PresentedFile {
+            directory: false,
+            modified_ms: None,
             name: "pattern.bin".into(),
             source: remote,
         }])?;

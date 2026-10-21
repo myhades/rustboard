@@ -58,7 +58,7 @@ try:
     # GTK uses INCR for larger selections.
     text.write_text('x'*200000);p.terminate();p.wait();p=publish('UTF8_STRING',text)
     wait(lambda:read(peerout/'received.json')['content'].get('text')==text.read_text());print('PASS INCR capture',flush=True)
-    source_dir=out/'source';source_dir.mkdir();local=source_dir/'local file 中文.bin';local.write_bytes(bytes(range(256))*16)
+    source_dir=out/'source';source_dir.mkdir();(source_dir/'folder/empty').mkdir(parents=True);script=source_dir/'folder/run';script.write_bytes(b'#!/bin/sh\nexit 0\n');script.chmod(0o700);local=source_dir/'local file 中文.bin';local.write_bytes(bytes(range(256))*16)
     subprocess.Popen(['thunar',str(source_dir)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     source_window=wait(lambda:subprocess.run(['xdotool','search','--onlyvisible','--name','^source -'],env=env,capture_output=True,text=True).stdout.strip()).splitlines()[-1]
     subprocess.run(['xdotool','windowactivate','--sync',source_window],env=env,check=True)
@@ -68,16 +68,42 @@ try:
     # A visible Thunar window can precede its directory listing becoming ready.
     wait(copy_source)
     offer=wait(lambda:(o if (o:=read(peerout/'received.json'))['content']['kind']=='files' else None))
-    received=peerout/('received-'+offer['content']['files'][0]['file_id']);wait(received.exists);assert received.read_bytes()==local.read_bytes();print('PASS Thunar Ctrl+C and local file transfer',flush=True)
+    received=peerout/('received-'+next(f['file_id'] for f in offer['content']['files'] if f['relative_path']==local.name));wait(received.exists);assert received.read_bytes()==local.read_bytes();assert any(f['directory'] and f['relative_path']=='folder/empty' for f in offer['content']['files']);entry=next(f for f in offer['content']['files'] if f['relative_path']=='folder/run');received=peerout/('received-'+entry['file_id']);wait(received.exists);assert received.read_bytes()==script.read_bytes() and entry['executable'];print('PASS Thunar Ctrl+C folder and file capture',flush=True)
     subprocess.run(['xdotool','windowclose',source_window],env=env,check=True)
-    # Image contents are transmitted as an ordinary PNG file.
+    # Native image bytes retain their representation.
     import gi
     gi.require_version('GdkPixbuf','2.0')
     from gi.repository import GdkPixbuf
     image=out/'synthetic.png';pix=GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB,False,8,16,16);pix.fill(0x00ff00ff);pix.savev(str(image),'png',[],[])
     publish('image/png',image)
-    offer=wait(lambda:(o if (o:=read(peerout/'received.json'))['content']['kind']=='files' and o['content']['files'][0]['relative_path'].endswith('.png') else None))
-    received=peerout/('received-'+offer['content']['files'][0]['file_id']);wait(received.exists);assert received.read_bytes()==image.read_bytes();print('PASS image as PNG file',flush=True)
+    offer=wait(lambda:(o if (o:=read(peerout/'received.json'))['content']['kind']=='image' else None))
+    received=peerout/('received-'+offer['content']['image']['file_id']);wait(received.exists);assert received.read_bytes()==image.read_bytes();print('PASS native PNG capture',flush=True)
+    rich=dict(kind='text',text='Rich text 中文',html='<b>Rich text 中文</b>',rtf=__import__('base64').b64encode(b'{\\rtf1 Rich text}').decode())
+    (peerout/'content.json').write_text(json.dumps(rich));command.write_text('content')
+    wait(lambda:get('text/html').stdout==rich['html'].encode());assert get('text/rtf').stdout==b'{\\rtf1 Rich text}'
+    print('PASS native HTML and RTF publication',flush=True)
+    import base64
+    rich['text']='Local rich text';rich['html']='<i>Local rich text</i>'
+    richfile=out/'formats.json';richfile.write_text(json.dumps({'text/plain':base64.b64encode(rich['text'].encode()).decode(),'text/html':base64.b64encode(rich['html'].encode()).decode(),'text/rtf':rich['rtf']}))
+    provider=subprocess.Popen([sys.executable,str(root/'platforms/linux/scripts/clipboard-probe.py'),'set-many',str(richfile),'10'],env=env,stdout=subprocess.PIPE,text=True);procs.append(provider);assert provider.stdout.readline().strip()=='ready'
+    # Give the original publication a new plain-text value to avoid echo suppression.
+    wait(lambda:read(peerout/'received.json')['content'].get('html')==rich['html'])
+    received=read(peerout/'received.json')['content'];assert received['text']==rich['text'] and received['rtf']==rich['rtf']
+    print('PASS grouped native HTML, RTF and plain-text capture',flush=True)
+    (peerout/'image.png').write_bytes(image.read_bytes());command.write_text('image')
+    wait(lambda:get('image/png').stdout==(peerout/'image.png').read_bytes());assert get('text/uri-list').returncode!=0
+    print('PASS native PNG publication',flush=True)
+    command.write_text('directory')
+    uris=wait(lambda:(r.stdout.decode().strip().splitlines() if (r:=get('text/uri-list')).returncode==0 and 'tree' in r.stdout.decode() else None))
+    tree=pathlib.Path(__import__('urllib.parse',fromlist=['unquote']).unquote(uris[0].removeprefix('file://')))
+    assert (tree/'empty').is_dir() and (tree/'nested/run').stat().st_size==4096
+    assert read(peerout/'reads.json')==[0]
+    import shutil
+    shutil.copytree(tree,out/'copied-tree')
+    assert (out/'copied-tree/empty').is_dir() and (out/'copied-tree/nested/run').read_bytes()==bytes(i%251 for i in range(4096))
+    assert int((out/'copied-tree/nested/run').stat().st_mtime)==1700000000
+    assert (out/'copied-tree/nested/run').stat().st_mode & 0o100
+    print('PASS lazy directory copy, empty directory and file attributes',flush=True)
     command.write_text('files');wait(lambda:read(peerout/'published.json')['content']['kind']=='files')
     (peerout/'text.txt').write_text('z'*200000);command.write_text('text');wait(lambda:get('UTF8_STRING').stdout==b'z'*200000);print('PASS INCR publication',flush=True)
     command.write_text('files');wait(lambda:get('text/uri-list').returncode==0)
@@ -96,7 +122,7 @@ try:
     a=start();assert read(config)['identity']==identity;a.kill();a.wait();a=start();assert read(config)['identity']==identity
     print('PASS keyring restart and stale mount recovery',flush=True)
     a.terminate();a.wait(timeout=10)
-    result=dict(passed=True,zero_preread=True,replacement=True,text=True,incr_capture=True,incr_publication=True,image_file=True,files=True,thunar_paste=True,keyring=True,crash_cleanup=True)
+    result=dict(passed=True,zero_preread=True,replacement=True,text=True,incr_capture=True,incr_publication=True,native_image=True,files=True,thunar_paste=True,keyring=True,crash_cleanup=True)
     report=root/'test-output/linux';report.mkdir(parents=True,exist_ok=True);(report/'desktop.json').write_text(json.dumps(result,indent=2))
 finally:
     for p in reversed(procs):

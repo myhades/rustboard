@@ -8,23 +8,90 @@
     "expires_unix_ms": 1000000,
     "content": {
       "kind": "files",
-      "files": [{
-        "file_id": "00000000-0000-0000-0000-000000000003",
-        "relative_path": "folder/样例.bin",
-        "size": 4096,
-        "version": "pattern-v1",
-        "media_type": "application/octet-stream"
-      }]
+      "files": [
+        {
+          "file_id": "11111111-1111-4111-8111-111111111111",
+          "relative_path": "folder",
+          "size": 0,
+          "version": "directory",
+          "media_type": "inode/directory",
+          "directory": true,
+          "modified_ms": null,
+          "executable": null
+        },
+        {
+          "file_id": "00000000-0000-0000-0000-000000000003",
+          "relative_path": "folder/样例.bin",
+          "size": 4096,
+          "version": "pattern-v1",
+          "media_type": "application/octet-stream",
+          "directory": false,
+          "modified_ms": null,
+          "executable": null
+        }
+      ]
     }
   },
-  "read": {"type":"read","background":false,"request_id":7,"source_device":"00000000-0000-0000-0000-000000000001","offer_id":"00000000-0000-0000-0000-000000000002","file_id":"00000000-0000-0000-0000-000000000003","version":"pattern-v1","offset":249,"length":5},
-  "data": {"type":"data","request_id":7,"offset":249,"bytes":[249,250,0,1,2],"eof":false},
-  "ipc": {"protocol":1,"request":{"type":"read_binary","background":false,"request_id":7,"offer_id":"00000000-0000-0000-0000-000000000002","file_id":"00000000-0000-0000-0000-000000000003","version":"pattern-v1","offset":249,"length":5}},
+  "read": {
+    "type": "read",
+    "background": false,
+    "request_id": 7,
+    "source_device": "00000000-0000-0000-0000-000000000001",
+    "offer_id": "00000000-0000-0000-0000-000000000002",
+    "file_id": "00000000-0000-0000-0000-000000000003",
+    "version": "pattern-v1",
+    "offset": 249,
+    "length": 5
+  },
+  "data": {
+    "type": "data",
+    "request_id": 7,
+    "offset": 249,
+    "bytes": [
+      249,
+      250,
+      0,
+      1,
+      2
+    ],
+    "eof": false
+  },
+  "ipc": {
+    "protocol": 1,
+    "request": {
+      "type": "read_binary",
+      "background": false,
+      "request_id": 7,
+      "offer_id": "00000000-0000-0000-0000-000000000002",
+      "file_id": "00000000-0000-0000-0000-000000000003",
+      "version": "pattern-v1",
+      "offset": 249,
+      "length": 5
+    }
+  },
   "pattern": "byte at offset i is i modulo 251",
   "hashes": [
-    {"size":4096,"sha256":"d67c656e01756650d77717b0839985a056ec28ffe174601d690fc407a2ceffca"},
-    {"size":67108864,"sha256":"98dc891b284e4d84ac25b0c0a24fdbe39a7f0dbd643ad5e8aa06e02fc6258254"},
-    {"size":1073741824,"sha256":"9cc5601236c455c6af19a76e64d2d95953a93b10eeb8b8b756a57090e1499b3e"}
+    {
+      "size": 4096,
+      "sha256": "d67c656e01756650d77717b0839985a056ec28ffe174601d690fc407a2ceffca"
+    },
+    {
+      "size": 67108864,
+      "sha256": "98dc891b284e4d84ac25b0c0a24fdbe39a7f0dbd643ad5e8aa06e02fc6258254"
+    },
+    {
+      "size": 1073741824,
+      "sha256": "9cc5601236c455c6af19a76e64d2d95953a93b10eeb8b8b756a57090e1499b3e"
+    }
   ],
-  "invalid_paths":["../secret","/etc/passwd","C:/secret","a\\b","a:b","CON.txt","folder//file","name."]
+  "invalid_paths": [
+    "../secret",
+    "/etc/passwd",
+    "C:/secret",
+    "a\\b",
+    "a:b",
+    "CON.txt",
+    "folder//file",
+    "name."
+  ]
 }

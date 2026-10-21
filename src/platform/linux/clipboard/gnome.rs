@@ -1,5 +1,5 @@
 use super::{
-    Captured, MIMES,
+    Captured,
     pipe::{Receiving, Sending},
 };
 use anyhow::{Context, Result};
@@ -25,7 +25,8 @@ pub struct Clipboard {
     path: dbus::Path<'static>,
     owner: String,
     formats: HashMap<String, Arc<Vec<u8>>>,
-    receiving: Option<Receiving>,
+    receiving: Vec<Receiving>,
+    captured: Option<Captured>,
     sending: Vec<(u32, Sending)>,
 }
 impl Clipboard {
@@ -71,7 +72,8 @@ impl Clipboard {
             path,
             owner,
             formats: HashMap::new(),
-            receiving: None,
+            receiving: Vec::new(),
+            captured: None,
             sending: Vec::new(),
         }))
     }
@@ -154,7 +156,8 @@ impl Clipboard {
         }
         // SetSelection can queue an unset followed by a new owner in the same round trip.
         if let Some(options) = owner_change {
-            self.receiving = None;
+            self.receiving.clear();
+            self.captured = None;
             captured = None;
             if options.get("session-is-owner").and_then(|v| v.0.as_u64()) != Some(1) {
                 self.formats.clear();
@@ -166,22 +169,35 @@ impl Clipboard {
                     .flatten()
                     .filter_map(|v| v.as_str())
                     .collect();
-                if let Some(mime) = MIMES.into_iter().find(|m| types.contains(m)) {
-                    let (fd,): (OwnedFd,) = self.call("SelectionRead", (mime,))?;
-                    self.receiving = Some(Receiving::new(
-                        unsafe { File::from_raw_fd(fd.into_fd()) },
-                        mime,
-                    )?);
-                } else {
+                for mime in super::capture_types(&types) {
+                    if let Ok((fd,)) = self.call::<_, (OwnedFd,)>("SelectionRead", (mime,)) {
+                        self.receiving.push(Receiving::new(
+                            unsafe { File::from_raw_fd(fd.into_fd()) },
+                            mime,
+                        )?);
+                    }
+                }
+                if self.receiving.is_empty() {
                     captured = Some(Captured::Unsupported);
                 }
             }
         }
-        if let Some(mut read) = self.receiving.take() {
-            if let Some(value) = read.poll()? {
-                captured = Some(value);
-            } else {
-                self.receiving = Some(read);
+        if !self.receiving.is_empty() {
+            let mut index = 0;
+            while index < self.receiving.len() {
+                match self.receiving[index].poll() {
+                    Ok(Some(value)) => {
+                        super::merge(&mut self.captured, value);
+                        self.receiving.swap_remove(index);
+                    }
+                    Ok(None) => index += 1,
+                    Err(_) => {
+                        self.receiving.swap_remove(index);
+                    }
+                }
+            }
+            if self.receiving.is_empty() {
+                captured = self.captured.take().or(Some(Captured::Unsupported));
             }
         }
         let mut index = 0;
@@ -197,8 +213,9 @@ impl Clipboard {
         }
         Ok(captured)
     }
-    fn publish(&mut self, formats: HashMap<String, Arc<Vec<u8>>>) -> Result<()> {
-        self.receiving = None;
+    pub fn publish_formats(&mut self, formats: HashMap<String, Arc<Vec<u8>>>) -> Result<()> {
+        self.receiving.clear();
+        self.captured = None;
         let mut options = PropMap::new();
         options.insert(
             "mime-types".into(),
@@ -208,18 +225,9 @@ impl Clipboard {
         self.formats = formats;
         Ok(())
     }
-    pub fn publish_text(&mut self, text: &str) -> Result<()> {
-        let bytes = Arc::new(text.as_bytes().to_vec());
-        self.publish(
-            ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"]
-                .into_iter()
-                .map(|m| (m.into(), bytes.clone()))
-                .collect(),
-        )
-    }
     pub fn publish_files(&mut self, paths: &[PathBuf]) -> Result<()> {
         let uris: Vec<_> = paths.iter().map(|p| super::uri(p)).collect();
-        self.publish(HashMap::from([
+        self.publish_formats(HashMap::from([
             (
                 "text/uri-list".into(),
                 Arc::new(format!("{}\r\n", uris.join("\r\n")).into_bytes()),

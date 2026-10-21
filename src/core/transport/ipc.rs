@@ -66,7 +66,14 @@ impl Node {
                 ))
             }
             IpcOperation::GetFileOffers => {
-                let offers = self.engine.lock().unwrap().retained_offers();
+                let offers: Vec<_> = self
+                    .engine
+                    .lock()
+                    .unwrap()
+                    .retained_offers()
+                    .into_iter()
+                    .filter(|o| matches!(o.content, Content::Files { .. }))
+                    .collect();
                 Ok(IpcReply::Other(
                     serde_json::json!({"ok":true,"protocol":1,"offers":offers}),
                 ))
@@ -81,18 +88,14 @@ impl Node {
                 length,
             } => {
                 ensure!(length > 0 && length as usize <= MAX_CHUNK, "invalid range");
-                let offer = self.engine.lock().unwrap().file_offer(&offer_id)?;
-                let Content::Files { files } = &offer.content else {
-                    anyhow::bail!("not file offer")
-                };
-                let file = files
-                    .iter()
-                    .find(|f| f.file_id == file_id && f.version == version)
-                    .ok_or_else(|| anyhow::anyhow!("version_changed"))?
-                    .clone();
-                let source: Arc<dyn ReadAt> = if offer.source_device == self.identity.device() {
+                let (source_device, file) = self
+                    .engine
+                    .lock()
+                    .unwrap()
+                    .file_entry(&offer_id, &file_id, &version)?;
+                let source: Arc<dyn ReadAt> = if source_device == self.identity.device() {
                     self.engine.lock().unwrap().source(
-                        &offer.source_device,
+                        &source_device,
                         &offer_id,
                         &file_id,
                         &version,
@@ -103,13 +106,13 @@ impl Node {
                         .lock()
                         .unwrap()
                         .iter()
-                        .find(|p| p.device() == offer.source_device)
+                        .find(|p| p.device() == source_device)
                         .cloned()
                         .ok_or_else(|| anyhow::anyhow!("unauthorized"))?;
                     ensure!(file.size.is_some(), "unknown size unsupported");
                     let key = (
-                        offer.source_device.clone(),
-                        offer.offer_id.clone(),
+                        source_device.clone(),
+                        offer_id.clone(),
                         file.file_id.clone(),
                         file.version.clone(),
                         request_id,
@@ -127,7 +130,7 @@ impl Node {
                             connection
                         }
                     };
-                    let mut remote = RemoteSource::new(self.clone(), peer, offer, file);
+                    let mut remote = RemoteSource::new(self.clone(), peer, offer_id.clone(), file);
                     remote.batch = retained
                         .clone()
                         .unwrap_or_else(|| connection.lock().unwrap().batch.clone());
@@ -135,6 +138,7 @@ impl Node {
                     remote.background = background;
                     Arc::new(remote)
                 };
+                let source = source.open_reader()?.unwrap_or(source);
                 ensure!(offset <= source.len(), "invalid range");
                 let mut bytes = vec![0; length as usize];
                 let n = if background {

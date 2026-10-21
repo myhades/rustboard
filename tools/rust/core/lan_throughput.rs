@@ -52,6 +52,9 @@ fn main() -> Result<()> {
         };
         let id = new_id();
         let file = FileEntry {
+            directory: false,
+            modified_ms: None,
+            executable: None,
             file_id: id.clone(),
             relative_path: "pattern.bin".into(),
             size: Some(size),
@@ -105,7 +108,7 @@ fn main() -> Result<()> {
         .max_by_key(|f| f.size)
         .context("empty offer")?
         .clone();
-    let remote = RemoteSource::new(node.clone(), peer, offer.clone(), file.clone());
+    let remote = RemoteSource::new(node.clone(), peer, offer.offer_id.clone(), file.clone());
     #[cfg(windows)]
     if args.get(5).is_some_and(|s| s == "com") {
         return receive_com(
@@ -208,6 +211,8 @@ fn receive_com(remote: RemoteSource, output: &Path) -> Result<()> {
     let _guard = Guard;
     let size = remote.len();
     let object = create(vec![PresentedFile {
+        directory: false,
+        modified_ms: None,
         name: "pattern.bin".into(),
         source: Arc::new(remote),
     }])?;

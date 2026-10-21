@@ -1,5 +1,6 @@
 //! Portable protocol and bounded content sources. No platform API types belong here.
 pub mod engine;
+pub mod files;
 pub mod protocol;
 pub mod source;
 pub mod transport;

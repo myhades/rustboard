@@ -19,6 +19,7 @@ unsafe extern "C" {
     fn rb_pump();
     fn rb_capture() -> *mut libc::c_char;
     fn rb_capture_image_file(stem: *const libc::c_char) -> i32;
+    fn rb_publish_image(bytes: *const u8, length: usize, jpeg: i32) -> i32;
     fn rb_publish(json: *const libc::c_char) -> i32;
 }
 // A short-lived host schedules native downloads without blocking clipboard polling.
@@ -36,9 +37,17 @@ pub struct MacBackend {
     pub node: Arc<Node>,
 }
 impl MacBackend {
-    fn publish_text(&mut self, text: &str) -> Result<()> {
-        ensure!(text.len() <= 262144 && !text.contains('\0'), "invalid text");
-        publish(serde_json::json!({"text":text}))
+    fn publish_text(
+        &mut self,
+        text: &str,
+        html: &Option<String>,
+        rtf: &Option<String>,
+    ) -> Result<()> {
+        ensure!(
+            text.len() <= crate::core::MAX_TEXT && !text.contains('\0'),
+            "invalid text"
+        );
+        publish(serde_json::json!({"text":text,"html":html,"rtf":rtf}))
     }
 }
 impl MacBackend {
@@ -79,7 +88,15 @@ impl MacBackend {
             .as_i64()
             .ok_or_else(|| anyhow::anyhow!("missing publication sequence"))?;
         ensure!(
-            unsafe { rb_adopt_files(published, files.len() as i64) } == 0,
+            unsafe {
+                rb_adopt_files(
+                    published,
+                    files
+                        .iter()
+                        .filter(|f| !f.relative_path.contains('/'))
+                        .count() as i64,
+                )
+            } == 0,
             "clipboard changed during publication"
         );
         let e = self.node.engine.lock().unwrap();
@@ -199,6 +216,7 @@ pub fn run() -> Result<()> {
     log::info!(target: "agent", "started");
     let mut backend = MacBackend { node: node.clone() };
     let mut presented: Option<String> = None;
+    let mut download = crate::app::image_file::Download::default();
     let mut pending: Option<Prefetch> = None;
     let mut last_prune = std::time::Instant::now();
     let mut retained = Vec::new();
@@ -218,6 +236,8 @@ pub fn run() -> Result<()> {
                 Some("text") => engine.local(
                     Content::Text {
                         text: value["text"].as_str().unwrap_or_default().into(),
+                        html: value["html"].as_str().map(str::to_owned),
+                        rtf: value["rtf"].as_str().map(str::to_owned),
                     },
                     Default::default(),
                 ),
@@ -230,9 +250,7 @@ pub fn run() -> Result<()> {
                     let cpath = CString::new(stem.as_os_str().as_encoded_bytes())?;
                     match unsafe { rb_capture_image_file(cpath.as_ptr()) } {
                         1 => crate::app::image_file::offer(&mut engine, stem.with_extension("png")),
-                        2 => {
-                            crate::app::image_file::offer(&mut engine, stem.with_extension("tiff"))
-                        }
+                        2 => crate::app::image_file::offer(&mut engine, stem.with_extension("jpg")),
                         _ => Err(anyhow::anyhow!("image file capture failed")),
                     }
                 }
@@ -250,7 +268,7 @@ pub fn run() -> Result<()> {
                 log::warn!(target: "clipboard", "clipboard capture rejected");
             } else {
                 if value["kind"] == "image" {
-                    log::debug!(target: "clipboard", "clipboard image published as ordinary file");
+                    log::debug!(target: "clipboard", "clipboard image captured");
                 } else {
                     log::debug!(target: "clipboard", "local offer published content_bytes_read=0");
                 }
@@ -264,21 +282,14 @@ pub fn run() -> Result<()> {
             .current
             .as_ref()
             .map(|o| o.offer_id.clone());
-        let mut live: Vec<_> = node
-            .engine
-            .lock()
-            .unwrap()
-            .retained_offers()
-            .into_iter()
-            .map(|o| o.offer_id)
-            .collect();
+        let mut live: Vec<_> = node.engine.lock().unwrap().retained_ids();
         live.sort();
         if live != retained || last_prune.elapsed() >= std::time::Duration::from_secs(10) {
             let _ = host_command(&["revoke"]);
             retained = live;
             last_prune = std::time::Instant::now();
         }
-        if presented.is_some() && presented != current_id {
+        if presented.is_some() && current_id.is_none() {
             unsafe {
                 rb_clear_owned();
             }
@@ -294,16 +305,35 @@ pub fn run() -> Result<()> {
                 }
             }
         }
-        let incoming = node.incoming.lock().unwrap().take();
-        if let Some((offer, _peer)) = incoming {
+        let incoming = match download.poll(&node) {
+            Ok(value) => value,
+            Err(error) => {
+                log::warn!(target: "clipboard", "image download failed: {error}");
+                None
+            }
+        };
+        if let Some((offer, _peer, image_bytes)) = incoming {
             let current = node.engine.lock().unwrap().current.clone();
             if current.as_ref().map(|o| &o.offer_id) != Some(&offer.offer_id) {
                 continue;
             }
             match &offer.content {
-                Content::Text { text } => {
-                    backend.publish_text(text)?;
+                Content::Text { text, html, rtf } => {
+                    backend.publish_text(text, html, rtf)?;
                     log::debug!(target: "clipboard", "native text publication complete");
+                }
+                Content::Image { image } => {
+                    let bytes = image_bytes.as_ref().unwrap();
+                    ensure!(
+                        unsafe {
+                            rb_publish_image(
+                                bytes.as_ptr(),
+                                bytes.len(),
+                                i32::from(image.media_type == "image/jpeg"),
+                            )
+                        } == 0,
+                        "image publication failed"
+                    );
                 }
                 Content::Files { .. } => {
                     if backend.publish_files(&offer).is_err() {

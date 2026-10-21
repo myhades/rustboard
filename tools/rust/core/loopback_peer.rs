@@ -39,6 +39,8 @@ fn main() -> anyhow::Result<()> {
                     node.engine.lock().unwrap().local(
                         Content::Text {
                             text: "Rustboard TLS Unicode 验证 🦀".into(),
+                            html: None,
+                            rtf: None,
                         },
                         HashMap::new(),
                     )?;
@@ -51,6 +53,9 @@ fn main() -> anyhow::Result<()> {
                         let id = new_id();
                         let source = Arc::new(PatternSource::new(size));
                         files.push(FileEntry {
+                            directory: false,
+                            modified_ms: None,
+                            executable: None,
                             file_id: id.clone(),
                             relative_path: format!("rustboard-tls-{size}.bin"),
                             size: Some(size),

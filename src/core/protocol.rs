@@ -3,9 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
 pub const PROTOCOL_VERSION: u16 = 1;
-pub const MAX_FRAME: usize = 1024 * 1024;
+pub const MAX_FRAME: usize = 32 * 1024 * 1024;
+pub const MAX_MANIFEST: usize = 8 * 1024 * 1024;
+pub const MAX_TEXT: usize = 4 * 1024 * 1024;
 pub const MAX_CHUNK: usize = 64 * 1024;
-pub const MAX_FILES: usize = 256;
+pub const MAX_FILES: usize = 10_000;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -44,6 +46,9 @@ pub enum IpcOperation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FileEntry {
+    pub directory: bool,
+    pub modified_ms: Option<u64>,
+    pub executable: Option<bool>,
     pub file_id: String,
     pub relative_path: String,
     pub size: Option<u64>,
@@ -54,8 +59,34 @@ pub struct FileEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Content {
-    Text { text: String },
-    Files { files: Vec<FileEntry> },
+    Text {
+        text: String,
+        html: Option<String>,
+        rtf: Option<String>,
+    },
+    Image {
+        image: FileEntry,
+    },
+    Files {
+        files: Vec<FileEntry>,
+    },
+}
+
+impl Content {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text {
+            text: text.into(),
+            html: None,
+            rtf: None,
+        }
+    }
+    pub fn entries(&self) -> &[FileEntry] {
+        match self {
+            Self::Files { files } => files,
+            Self::Image { image } => std::slice::from_ref(image),
+            Self::Text { .. } => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -72,7 +103,7 @@ pub struct Offer {
 
 pub fn validate_path(path: &str) -> Result<()> {
     ensure!(
-        !path.is_empty() && path.len() <= 1024,
+        !path.is_empty() && path.len() <= 1024 && path.split('/').count() <= 64,
         "invalid path length"
     );
     for part in path.split('/') {
@@ -111,19 +142,69 @@ impl Offer {
             "expired or excessive lifetime"
         );
         match &self.content {
-            Content::Text { text } => ensure!(
-                text.len() <= 256 * 1024 && !text.contains('\0'),
-                "invalid text"
-            ),
+            Content::Text { text, html, rtf } => {
+                use base64::Engine;
+                let rich = rtf
+                    .as_ref()
+                    .map(|v| base64::prelude::BASE64_STANDARD.decode(v))
+                    .transpose()?;
+                ensure!(
+                    text.len()
+                        + html.as_ref().map_or(0, String::len)
+                        + rich.as_ref().map_or(0, Vec::len)
+                        <= MAX_TEXT
+                        && !text.contains('\0')
+                        && !html.as_ref().is_some_and(|v| v.contains('\0')),
+                    "invalid text"
+                );
+            }
+            Content::Image { image } => {
+                ensure!(
+                    !image.directory
+                        && image.size.is_some_and(|n| n > 0 && n <= 64 * 1024 * 1024)
+                        && matches!(image.media_type.as_str(), "image/png" | "image/jpeg"),
+                    "invalid image"
+                );
+                uuid::Uuid::parse_str(&image.file_id)?;
+                ensure!(
+                    !image.version.is_empty() && image.version.len() <= 128,
+                    "invalid version"
+                );
+                validate_path(&image.relative_path)?;
+            }
             Content::Files { files } => {
                 ensure!(
                     !files.is_empty() && files.len() <= MAX_FILES,
                     "invalid file count"
                 );
+                ensure!(
+                    serde_json::to_vec(files)?.len() <= MAX_MANIFEST,
+                    "file manifest too large"
+                );
                 let mut ids = std::collections::HashSet::new();
                 let mut paths = std::collections::HashSet::new();
+                let entries: std::collections::HashMap<_, _> = files
+                    .iter()
+                    .map(|f| (f.relative_path.as_str(), f))
+                    .collect();
                 for file in files {
+                    if let Some((parent, _)) = file.relative_path.rsplit_once('/') {
+                        ensure!(
+                            entries.get(parent).is_some_and(|p| p.directory),
+                            "missing directory"
+                        );
+                    }
                     validate_path(&file.relative_path)?;
+                    ensure!(
+                        file.modified_ms.is_none_or(|v| v <= 253402300799999)
+                            && file.size.is_none_or(|v| v <= i64::MAX as u64)
+                            && file.media_type.len() <= 128,
+                        "invalid file metadata"
+                    );
+                    ensure!(
+                        !file.directory || file.size == Some(0),
+                        "invalid directory size"
+                    );
                     uuid::Uuid::parse_str(&file.file_id)?;
                     ensure!(
                         ids.insert(&file.file_id)
@@ -225,6 +306,92 @@ pub fn read_frame<R: Read, T: serde::de::DeserializeOwned>(reader: &mut R) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn offer(content: Content) -> Offer {
+        Offer {
+            protocol: PROTOCOL_VERSION,
+            source_device: super::super::engine::new_id(),
+            offer_id: super::super::engine::new_id(),
+            event_sequence: 1,
+            expires_unix_ms: 1000,
+            content,
+        }
+    }
+    fn file(path: &str, directory: bool) -> FileEntry {
+        FileEntry {
+            file_id: super::super::engine::new_id(),
+            relative_path: path.into(),
+            size: Some(0),
+            version: "v".into(),
+            media_type: "application/octet-stream".into(),
+            directory,
+            modified_ms: None,
+            executable: None,
+        }
+    }
+    #[test]
+    fn directory_manifest_bounds_and_parent_identity() {
+        let mut files = vec![
+            file("root", true),
+            file("root/empty", true),
+            file("root/file", false),
+        ];
+        offer(Content::Files {
+            files: files.clone(),
+        })
+        .validate(0)
+        .unwrap();
+        files[0].directory = false;
+        assert!(
+            offer(Content::Files {
+                files: files.clone()
+            })
+            .validate(0)
+            .is_err()
+        );
+        files[0].directory = true;
+        files[2].relative_path = "ROOT/file".into();
+        assert!(offer(Content::Files { files }).validate(0).is_err());
+        let mut files: Vec<_> = (0..MAX_FILES)
+            .map(|i| file(&format!("{i}.txt"), false))
+            .collect();
+        offer(Content::Files {
+            files: files.clone(),
+        })
+        .validate(0)
+        .unwrap();
+        files.push(file("one-too-many", false));
+        assert!(offer(Content::Files { files }).validate(0).is_err());
+    }
+    #[test]
+    fn rich_text_and_image_limits_are_validated_before_reading() {
+        use base64::Engine;
+        let content = Content::Text {
+            text: "中文".into(),
+            html: Some("<b>中文</b>".into()),
+            rtf: Some(base64::prelude::BASE64_STANDARD.encode(b"{\\rtf1 text}")),
+        };
+        let offer = offer(content);
+        offer.validate(0).unwrap();
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &offer).unwrap();
+        assert_eq!(read_frame::<_, Offer>(&mut &bytes[..]).unwrap(), offer);
+        let text = super::tests::offer(Content::text("\u{1}".repeat(MAX_TEXT)));
+        text.validate(0).unwrap();
+        write_frame(&mut Vec::new(), &text).unwrap();
+        assert!(
+            super::tests::offer(Content::text("x".repeat(MAX_TEXT + 1)))
+                .validate(0)
+                .is_err()
+        );
+        let mut image = file("image.png", false);
+        image.media_type = "image/png".into();
+        image.size = Some(64 * 1024 * 1024 + 1);
+        assert!(
+            super::tests::offer(Content::Image { image })
+                .validate(0)
+                .is_err()
+        );
+    }
     #[test]
     fn unsafe_paths() {
         for path in [

@@ -43,7 +43,7 @@ func evictPrevious(reset: Bool = false, _ completion:@escaping(Error?)->Void) {
         _ = try retiredItems(profile:profile,adding:deleted)
         guard let manager=NSFileProviderManager(for:domain) else {throw WireError.unavailable}
         let group=DispatchGroup(), lock=NSLock();var failed=false
-        for offer in expired {for file in offer.content.files ?? [] {
+        for offer in expired {for file in offer.content.files ?? [] where !file.directory {
             group.enter();manager.evictItem(identifier:.init(itemID(offer,file))) {error in
                 if let error, (error as NSError).code != NSFileProviderError.noSuchItem.rawValue {lock.lock();failed=true;lock.unlock()}
                 group.leave()
@@ -83,7 +83,7 @@ case "prefetch":
               let files = offer.content.files, let manager = NSFileProviderManager(for: domain) else {throw WireError.stale}
         guard eagerEligible(files) else {finish(nil);break}
         let group = DispatchGroup(), lock = NSLock(); var failed = false
-        for file in files {
+        for file in files where !file.directory {
             group.enter()
             manager.requestDownloadForItem(withIdentifier: .init(itemID(offer, file))) {error in
                 if let error {
@@ -107,14 +107,15 @@ case "urls":
             manager.signalEnumerator(for:.rootContainer) {_ in }
             manager.signalEnumerator(for:.workingSet) {_ in }
             var urls=[URL]();let lock=NSLock();let group=DispatchGroup();var failed=false
-            for file in files {
+            let roots = files.filter {!$0.relative_path.contains("/")}
+            for file in roots {
                 group.enter()
                 manager.getUserVisibleURL(for:.init(itemID(offer,file))) {url,error in
                     lock.lock();if let url, error == nil {urls.append(url)} else {failed=true;if let error {let ns=error as NSError;fputs("getUserVisibleURL domain=\(ns.domain) code=\(ns.code)\n",stderr)}};lock.unlock();group.leave()
                 }
             }
             group.notify(queue:.main) {
-                guard !failed, urls.count==files.count else {finish(WireError.unavailable);return}
+                guard !failed, urls.count==roots.count else {finish(WireError.unavailable);return}
                 do {
                     try saveIndex(offer)
                     if let raw = CommandLine.arguments.dropFirst(3).first, let expected = Int(raw) {
@@ -132,7 +133,7 @@ case "urls":
                             return item
                         }
                         guard NSPasteboard.general.writeObjects(items),
-                              NSPasteboard.general.pasteboardItems?.count == files.count else {throw WireError.unavailable}
+                              NSPasteboard.general.pasteboardItems?.count == roots.count else {throw WireError.unavailable}
                         let data = try JSONSerialization.data(withJSONObject: ["change_count": NSPasteboard.general.changeCount])
                         FileHandle.standardOutput.write(data)
                         // pboard validates sandbox grants asynchronously. Retain scopes while

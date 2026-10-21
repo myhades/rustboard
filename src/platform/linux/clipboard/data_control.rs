@@ -1,5 +1,5 @@
 use super::{
-    Captured, MIMES,
+    Captured,
     pipe::{Receiving, Sending},
 };
 use anyhow::{Context, Result, ensure};
@@ -37,7 +37,8 @@ pub struct Clipboard {
     queue: EventQueue<State>,
     state: State,
     device: device::ExtDataControlDeviceV1,
-    receiving: Option<Receiving>,
+    receiving: Vec<Receiving>,
+    captured: Option<Captured>,
 }
 impl Clipboard {
     /// None means the compositor does not advertise this protocol, not that initialization failed.
@@ -64,7 +65,8 @@ impl Clipboard {
             queue,
             state,
             device,
-            receiving: None,
+            receiving: Vec::new(),
+            captured: None,
         }))
     }
     fn dispatch(&mut self) -> Result<()> {
@@ -110,7 +112,8 @@ impl Clipboard {
             .sending
             .retain_mut(|send| matches!(send.poll(), Ok(false)));
         if std::mem::take(&mut self.state.changed) {
-            self.receiving = None;
+            self.receiving.clear();
+            self.captured = None;
             let Some(offer) = &self.state.selection else {
                 return Ok(Some(Captured::Unsupported));
             };
@@ -118,31 +121,47 @@ impl Clipboard {
             if types.contains(&self.state.marker) {
                 return Ok(None);
             }
-            let Some(mime) = MIMES.into_iter().find(|m| types.iter().any(|t| t == m)) else {
+            let types: Vec<_> = types.iter().map(String::as_str).collect();
+            let mimes = super::capture_types(&types);
+            if mimes.is_empty() {
                 return Ok(Some(Captured::Unsupported));
-            };
-            let mut fds = [-1; 2];
-            ensure!(
-                unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } == 0,
-                "cannot open clipboard pipe"
-            );
-            let reader = unsafe { File::from_raw_fd(fds[0]) };
-            let writer = unsafe { OwnedFd::from_raw_fd(fds[1]) };
-            let receiving = Receiving::new(reader, mime)?;
-            offer.receive(mime.into(), writer.as_fd());
-            self.receiving = Some(receiving);
+            }
+            for mime in mimes {
+                let mut fds = [-1; 2];
+                ensure!(
+                    unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } == 0,
+                    "cannot open clipboard pipe"
+                );
+                let reader = unsafe { File::from_raw_fd(fds[0]) };
+                let writer = unsafe { OwnedFd::from_raw_fd(fds[1]) };
+                self.receiving.push(Receiving::new(reader, mime)?);
+                offer.receive(mime.into(), writer.as_fd());
+            }
             self.flush()?;
         }
-        if let Some(mut read) = self.receiving.take() {
-            if let Some(value) = read.poll()? {
-                return Ok(Some(value));
+        if !self.receiving.is_empty() {
+            let mut index = 0;
+            while index < self.receiving.len() {
+                match self.receiving[index].poll() {
+                    Ok(Some(value)) => {
+                        super::merge(&mut self.captured, value);
+                        self.receiving.swap_remove(index);
+                    }
+                    Ok(None) => index += 1,
+                    Err(_) => {
+                        self.receiving.swap_remove(index);
+                    }
+                }
             }
-            self.receiving = Some(read);
+            if self.receiving.is_empty() {
+                return Ok(self.captured.take().or(Some(Captured::Unsupported)));
+            }
         }
         Ok(None)
     }
-    fn publish(&mut self, formats: Formats) -> Result<()> {
-        self.receiving = None;
+    pub fn publish_formats(&mut self, formats: Formats) -> Result<()> {
+        self.receiving.clear();
+        self.captured = None;
         let source = self
             .state
             .manager
@@ -159,18 +178,9 @@ impl Clipboard {
         }
         self.flush()
     }
-    pub fn publish_text(&mut self, text: &str) -> Result<()> {
-        let bytes = Arc::new(text.as_bytes().to_vec());
-        self.publish(
-            ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"]
-                .into_iter()
-                .map(|m| (m.into(), bytes.clone()))
-                .collect(),
-        )
-    }
     pub fn publish_files(&mut self, paths: &[PathBuf]) -> Result<()> {
         let uris: Vec<_> = paths.iter().map(|p| super::uri(p)).collect();
-        self.publish(HashMap::from([
+        self.publish_formats(HashMap::from([
             (
                 "text/uri-list".into(),
                 Arc::new(format!("{}\r\n", uris.join("\r\n")).into_bytes()),

@@ -1,7 +1,4 @@
-use crate::core::{
-    Content, FileEntry, LocalFile, Offer, ReadAt,
-    engine::{Engine, new_id},
-};
+use crate::core::{Content, LocalFile, Offer, ReadAt, engine::Engine};
 use anyhow::{Result, ensure};
 use std::{
     collections::HashMap,
@@ -19,7 +16,7 @@ unsafe extern "C" {
     fn fclonefileat(src: i32, dst_dir: i32, dst: *const libc::c_char, flags: u32) -> i32;
 }
 struct Snapshot {
-    source: LocalFile,
+    size: u64,
     path: PathBuf,
 }
 impl Drop for Snapshot {
@@ -28,21 +25,24 @@ impl Drop for Snapshot {
     }
 }
 impl ReadAt for Snapshot {
+    fn open_reader(&self) -> Result<Option<Arc<dyn ReadAt>>> {
+        Ok(Some(Arc::new(LocalFile::open(&self.path)?)))
+    }
     fn len(&self) -> u64 {
-        self.source.len()
+        self.size
     }
     fn read_at(&self, offset: u64, buffer: &mut [u8]) -> Result<usize> {
-        self.source.read_at(offset, buffer)
+        LocalFile::open(&self.path)?.read_at(offset, buffer)
     }
 }
 pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, dir: &Path) -> Result<Offer> {
-    ensure!(
-        !paths.is_empty() && paths.len() <= 256,
-        "invalid file count"
-    );
     let mut files = Vec::new();
     let mut sources: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
-    for path in paths {
+    for (path, mut entry) in crate::core::files::manifest(paths)? {
+        if entry.directory {
+            files.push(entry);
+            continue;
+        }
         // Opening a File Provider placeholder can itself trigger hydration. Reject
         // it using metadata first, then recheck the opened inode against races.
         let metadata = fs::symlink_metadata(&path)?;
@@ -69,13 +69,7 @@ pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, dir: &Path) -> Result<Off
             stat.st_flags & 0x4000_0000 == 0,
             "dataless sources unsupported"
         );
-        let name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| anyhow::anyhow!("invalid name"))?
-            .to_owned();
-        crate::core::validate_path(&name)?;
-        let id = new_id();
+        let id = entry.file_id.clone();
         let snapshot = dir.join(&id);
         let cpath = CString::new(snapshot.as_os_str().as_bytes())?;
         // Atomic APFS COW clone; no byte-copy fallback on unsupported filesystems.
@@ -91,16 +85,12 @@ pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, dir: &Path) -> Result<Off
             }
         };
         let source = Arc::new(Snapshot {
-            source,
+            size: source.len(),
             path: snapshot,
         });
-        files.push(FileEntry {
-            file_id: id.clone(),
-            relative_path: name,
-            size: Some(source.len()),
-            version: id.clone(),
-            media_type: "application/octet-stream".into(),
-        });
+        entry.size = Some(source.len());
+        entry.version = id.clone();
+        files.push(entry);
         sources.insert(id, source);
     }
     engine.local(Content::Files { files }, sources)
@@ -108,6 +98,7 @@ pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, dir: &Path) -> Result<Off
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::engine::new_id;
     #[test]
     fn clone_survives_source_mutation_and_cleans_up() {
         let dir = std::env::temp_dir().join(new_id());

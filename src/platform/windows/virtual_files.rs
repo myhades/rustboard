@@ -12,7 +12,7 @@ use std::{
 use windows::{
     Win32::{
         Foundation::*,
-        Storage::FileSystem::FILE_ATTRIBUTE_NORMAL,
+        Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL},
         System::{Com::*, DataExchange::RegisterClipboardFormatW, Memory::*},
         UI::Shell::*,
     },
@@ -223,8 +223,8 @@ pub fn create(files: Vec<PresentedFile>) -> anyhow::Result<IDataObject> {
     for file in &files {
         crate::core::validate_path(&file.name)?;
         anyhow::ensure!(
-            !file.name.contains('/') && file.name.encode_utf16().count() < 260,
-            "only flat files currently supported"
+            file.name.replace('/', r"\").encode_utf16().count() < 260,
+            "Windows file descriptor path too long"
         );
         anyhow::ensure!(names.insert(file.name.to_lowercase()), "duplicate filename");
     }
@@ -307,6 +307,9 @@ impl IDataObject_Impl for VirtualFiles_Impl {
         let f = unsafe { &*input };
         self.validate(f).ok()?;
         if f.cfFormat == self.contents {
+            if self.files[f.lindex as usize].directory {
+                return Err(DV_E_FORMATETC.into());
+            }
             return Ok(STGMEDIUM {
                 tymed: TYMED_ISTREAM.0 as u32,
                 u: STGMEDIUM_0 {
@@ -323,14 +326,36 @@ impl IDataObject_Impl for VirtualFiles_Impl {
             bytes[..4].copy_from_slice(&(self.files.len() as u32).to_le_bytes());
             for (i, file) in self.files.iter().enumerate() {
                 let mut fd = FILEDESCRIPTORW {
-                    dwFlags: FD_FILESIZE.0 as u32 | FD_ATTRIBUTES.0 as u32 | FD_PROGRESSUI.0 as u32,
-                    dwFileAttributes: FILE_ATTRIBUTE_NORMAL.0,
+                    dwFlags: (if file.directory {
+                        0
+                    } else {
+                        FD_FILESIZE.0 as u32
+                    }) | FD_ATTRIBUTES.0 as u32
+                        | FD_PROGRESSUI.0 as u32,
+                    dwFileAttributes: if file.directory {
+                        FILE_ATTRIBUTE_DIRECTORY.0
+                    } else {
+                        FILE_ATTRIBUTE_NORMAL.0
+                    },
                     nFileSizeHigh: (file.source.len() >> 32) as u32,
                     nFileSizeLow: file.source.len() as u32,
                     ..Default::default()
                 };
+                if let Some(ms) = file.modified_ms {
+                    let ticks = ms
+                        .saturating_mul(10_000)
+                        .saturating_add(116_444_736_000_000_000);
+                    fd.dwFlags |= FD_WRITESTIME.0 as u32;
+                    fd.ftLastWriteTime = FILETIME {
+                        dwLowDateTime: ticks as u32,
+                        dwHighDateTime: (ticks >> 32) as u32,
+                    };
+                }
                 let mut name = [0u16; 260];
-                for (out, c) in name.iter_mut().zip(file.name.encode_utf16()) {
+                for (out, c) in name
+                    .iter_mut()
+                    .zip(file.name.replace('/', r"\").encode_utf16())
+                {
                     *out = c;
                 }
                 fd.cFileName = name;
@@ -401,6 +426,84 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
     #[test]
+    fn shell_copies_nested_and_empty_virtual_directories() {
+        use windows::Win32::System::Ole::*;
+        use windows::core::PCWSTR;
+        let root = std::env::temp_dir().join(crate::core::engine::new_id());
+        std::fs::create_dir(&root).unwrap();
+        let source = Arc::new(PatternSource::new(31));
+        let object = create(vec![
+            PresentedFile {
+                name: "tree".into(),
+                directory: true,
+                modified_ms: None,
+                source: source.clone(),
+            },
+            PresentedFile {
+                name: "tree/empty".into(),
+                directory: true,
+                modified_ms: None,
+                source: source.clone(),
+            },
+            PresentedFile {
+                name: "tree/nested".into(),
+                directory: true,
+                modified_ms: None,
+                source: source.clone(),
+            },
+            PresentedFile {
+                name: "tree/nested/文件.bin".into(),
+                directory: false,
+                modified_ms: Some(1700000000000),
+                source: source.clone(),
+            },
+        ])
+        .unwrap();
+        assert_eq!(
+            source.bytes_read.load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        unsafe {
+            OleInitialize(None).unwrap();
+            let path: Vec<u16> = root
+                .as_os_str()
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
+            let destination: IShellItem =
+                SHCreateItemFromParsingName(PCWSTR(path.as_ptr()), None).unwrap();
+            let target: IDropTarget = destination.BindToHandler(None, &BHID_SFUIObject).unwrap();
+            let mut effect = DROPEFFECT_COPY;
+            target
+                .DragEnter(&object, Default::default(), POINTL::default(), &mut effect)
+                .unwrap();
+            assert_eq!(effect, DROPEFFECT_COPY);
+            target
+                .Drop(&object, Default::default(), POINTL::default(), &mut effect)
+                .unwrap();
+            assert_eq!(effect, DROPEFFECT_COPY);
+            drop(target);
+            drop(destination);
+            drop(object);
+            OleUninitialize();
+        }
+        assert!(root.join("tree/empty").is_dir());
+        assert_eq!(
+            std::fs::read(root.join("tree/nested/文件.bin")).unwrap(),
+            (0..31).collect::<Vec<u8>>()
+        );
+        let modified = std::fs::metadata(root.join("tree/nested/文件.bin"))
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        assert_eq!(modified, 1700000000000);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn com_batch_over_tls_survives_new_file_and_text_clipboards() {
         use crate::core::{
             Content, FileEntry,
@@ -423,6 +526,9 @@ mod tests {
         let source = Arc::new(PatternSource::new(size));
         let files: Vec<_> = (0..2)
             .map(|i| FileEntry {
+                directory: false,
+                modified_ms: None,
+                executable: None,
                 file_id: new_id(),
                 relative_path: format!("file-{i}.bin"),
                 size: Some(size),
@@ -450,11 +556,13 @@ mod tests {
             files
                 .iter()
                 .map(|f| PresentedFile {
+                    directory: false,
+                    modified_ms: None,
                     name: f.relative_path.clone(),
                     source: Arc::new(RemoteSource::new(
                         target_node.clone(),
                         peer.clone(),
-                        manifest.clone(),
+                        manifest.offer_id.clone(),
                         f.clone(),
                     )),
                 })
@@ -514,6 +622,8 @@ mod tests {
                             .local(
                                 Content::Text {
                                     text: "replacement".into(),
+                                    html: None,
+                                    rtf: None,
                                 },
                                 Default::default(),
                             )
@@ -553,6 +663,8 @@ mod tests {
     fn descriptor_does_not_read_content_and_validates_index() {
         let source = Arc::new(crate::test_pattern::PatternSource::new(1 << 30));
         let object = create(vec![PresentedFile {
+            directory: false,
+            modified_ms: None,
             name: "test.bin".into(),
             source: source.clone(),
         }])

@@ -1,4 +1,4 @@
-//! Clipboard image bytes become an ordinary, offer-owned file. No image wire type.
+//! Encoded clipboard images use the same bounded transfer as files.
 #[cfg(not(windows))]
 use crate::core::LocalFile;
 use crate::core::{
@@ -75,14 +75,22 @@ pub fn offer(engine: &mut Engine, path: PathBuf) -> Result<Offer> {
         });
         let id = new_id();
         engine.local(
-            Content::Files {
-                files: vec![FileEntry {
+            Content::Image {
+                image: FileEntry {
+                    directory: false,
+                    modified_ms: None,
+                    executable: None,
                     file_id: id.clone(),
                     relative_path: name,
                     size: Some(source.len()),
                     version,
-                    media_type: "application/octet-stream".into(),
-                }],
+                    media_type: match path.extension().and_then(|s| s.to_str()) {
+                        Some("png") => "image/png",
+                        Some("jpg" | "jpeg") => "image/jpeg",
+                        _ => anyhow::bail!("unsupported image encoding"),
+                    }
+                    .into(),
+                },
             },
             [(id, source as Arc<dyn ReadAt>)].into(),
         )
@@ -93,9 +101,191 @@ pub fn offer(engine: &mut Engine, path: PathBuf) -> Result<Offer> {
     result
 }
 
+type ImageTask = (
+    Offer,
+    crate::core::transport::Peer,
+    std::thread::JoinHandle<Result<Vec<u8>>>,
+);
+pub type Publication = (Offer, crate::core::transport::Peer, Option<Vec<u8>>);
+
+#[derive(Default)]
+pub struct Download {
+    task: Option<ImageTask>,
+}
+impl Download {
+    pub fn poll(
+        &mut self,
+        node: &Arc<crate::core::transport::Node>,
+    ) -> Result<Option<Publication>> {
+        if self
+            .task
+            .as_ref()
+            .is_some_and(|(_, _, task)| task.is_finished())
+        {
+            let (offer, peer, task) = self.task.take().unwrap();
+            let bytes = task
+                .join()
+                .map_err(|_| anyhow::anyhow!("image download stopped"))?;
+            if node
+                .engine
+                .lock()
+                .unwrap()
+                .current
+                .as_ref()
+                .map(|o| &o.offer_id)
+                == Some(&offer.offer_id)
+            {
+                return Ok(Some((offer, peer, Some(bytes?))));
+            }
+        }
+        let mut incoming = node.incoming.lock().unwrap();
+        if incoming
+            .as_ref()
+            .is_some_and(|(o, _)| matches!(o.content, Content::Image { .. }))
+        {
+            if self.task.is_none() {
+                let (offer, peer) = incoming.take().unwrap();
+                let Content::Image { image } = &offer.content else {
+                    unreachable!()
+                };
+                let source = crate::core::transport::RemoteSource::new(
+                    node.clone(),
+                    peer.clone(),
+                    offer.offer_id.clone(),
+                    image.clone(),
+                );
+                let id = offer.offer_id.clone();
+                let node = node.clone();
+                let task = std::thread::spawn(move || {
+                    let mut bytes = vec![0; source.len() as usize];
+                    let mut offset = 0;
+                    while offset < bytes.len() {
+                        ensure!(
+                            !node.stop.load(std::sync::atomic::Ordering::Acquire)
+                                && node
+                                    .engine
+                                    .lock()
+                                    .unwrap()
+                                    .current
+                                    .as_ref()
+                                    .map(|o| &o.offer_id)
+                                    == Some(&id),
+                            "image replaced"
+                        );
+                        let end = (offset + crate::core::MAX_CHUNK).min(bytes.len());
+                        let n = source.read_at(offset as u64, &mut bytes[offset..end])?;
+                        ensure!(n > 0, "incomplete image");
+                        offset += n;
+                    }
+                    Ok(bytes)
+                });
+                self.task = Some((offer, peer, task));
+            }
+            Ok(None)
+        } else {
+            Ok(incoming.take().map(|(offer, peer)| (offer, peer, None)))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn image_download_is_complete_and_does_not_publish_replaced_content() {
+        use crate::core::transport::{Identity, Node, Peer};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+        struct Source {
+            started: AtomicBool,
+            release: AtomicBool,
+        }
+        impl ReadAt for Source {
+            fn len(&self) -> u64 {
+                131072
+            }
+            fn read_at(&self, offset: u64, buffer: &mut [u8]) -> Result<usize> {
+                self.started.store(true, Ordering::Release);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !self.release.load(Ordering::Acquire) {
+                    ensure!(Instant::now() < deadline, "test timed out");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                let length = buffer.len().min((self.len() - offset) as usize);
+                buffer[..length].fill(42);
+                Ok(length)
+            }
+        }
+        let a = Node::new(Identity::generate().unwrap(), vec![]);
+        let b = Node::new(Identity::generate().unwrap(), vec![]);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let peer = Peer {
+            address: listener.local_addr().unwrap(),
+            fingerprint: a.identity.pin(),
+        };
+        a.peers.lock().unwrap().push(Peer {
+            address: peer.address,
+            fingerprint: b.identity.pin(),
+        });
+        b.peers.lock().unwrap().push(peer.clone());
+        let server = a.serve(listener).unwrap();
+        let mut download = Download::default();
+        for replaced in [false, true] {
+            let source = Arc::new(Source {
+                started: AtomicBool::new(false),
+                release: AtomicBool::new(false),
+            });
+            let id = new_id();
+            a.engine
+                .lock()
+                .unwrap()
+                .local(
+                    Content::Image {
+                        image: FileEntry {
+                            file_id: id.clone(),
+                            relative_path: "image.png".into(),
+                            size: Some(source.len()),
+                            version: "image".into(),
+                            media_type: "image/png".into(),
+                            directory: false,
+                            modified_ms: None,
+                            executable: None,
+                        },
+                    },
+                    [(id, source.clone() as Arc<dyn ReadAt>)].into(),
+                )
+                .unwrap();
+            b.sync_once(&peer).unwrap();
+            assert!(download.poll(&b).unwrap().is_none());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !source.started.load(Ordering::Acquire) {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if replaced {
+                b.engine
+                    .lock()
+                    .unwrap()
+                    .local(Content::text("new text"), Default::default())
+                    .unwrap();
+            }
+            source.release.store(true, Ordering::Release);
+            let mut result = None;
+            while download.task.is_some() {
+                assert!(Instant::now() < deadline);
+                result = download.poll(&b).unwrap().or(result);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if replaced {
+                assert!(result.is_none());
+            } else {
+                assert_eq!(result.unwrap().2.unwrap(), vec![42; 131072]);
+            }
+        }
+        a.stop.store(true, Ordering::Release);
+        b.stop.store(true, Ordering::Release);
+        server.join().unwrap();
+    }
     #[test]
     fn owned_image_is_removed_on_withdraw_and_rejection() {
         let dir = std::env::temp_dir().join(new_id());

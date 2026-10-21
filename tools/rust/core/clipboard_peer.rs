@@ -40,8 +40,62 @@ fn main() -> anyhow::Result<()> {
                 "text" => {
                     let text = std::fs::read_to_string(out.join("text.txt"))
                         .unwrap_or_else(|_| "Rustboard Linux Unicode 验证 🦀".into());
-                    anyhow::ensure!(text.len() <= 262144, "acceptance size limit");
-                    engine.local(Content::Text { text }, HashMap::new())?;
+                    anyhow::ensure!(text.len() <= MAX_TEXT, "acceptance size limit");
+                    engine.local(Content::text(text), HashMap::new())?;
+                }
+                "content" => {
+                    engine.local(
+                        serde_json::from_slice(&std::fs::read(out.join("content.json"))?)?,
+                        HashMap::new(),
+                    )?;
+                }
+                "image" => {
+                    let source = Arc::new(LocalFile::open(&out.join("image.png"))?);
+                    let id = new_id();
+                    engine.local(
+                        Content::Image {
+                            image: FileEntry {
+                                file_id: id.clone(),
+                                relative_path: "image.png".into(),
+                                size: Some(source.len()),
+                                version: source.version(),
+                                media_type: "image/png".into(),
+                                directory: false,
+                                modified_ms: None,
+                                executable: None,
+                            },
+                        },
+                        [(id, source as Arc<dyn ReadAt>)].into(),
+                    )?;
+                }
+                "directory" => {
+                    let mut files = Vec::new();
+                    let mut map: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
+                    sources.clear();
+                    for (path, directory) in [
+                        ("tree", true),
+                        ("tree/empty", true),
+                        ("tree/nested", true),
+                        ("tree/nested/run", false),
+                    ] {
+                        let id = new_id();
+                        files.push(FileEntry {
+                            file_id: id.clone(),
+                            relative_path: path.into(),
+                            size: Some(if directory { 0 } else { 4096 }),
+                            version: "fixture".into(),
+                            media_type: "application/octet-stream".into(),
+                            directory,
+                            modified_ms: Some(1700000000000),
+                            executable: Some(!directory),
+                        });
+                        if !directory {
+                            let source = Arc::new(pattern::PatternSource::new(4096));
+                            map.insert(id, source.clone());
+                            sources.push(source);
+                        }
+                    }
+                    engine.local(Content::Files { files }, map)?;
                 }
                 "files" => {
                     let mut files = Vec::new();
@@ -51,6 +105,9 @@ fn main() -> anyhow::Result<()> {
                         let id = new_id();
                         let source = Arc::new(pattern::PatternSource::new(size));
                         files.push(FileEntry {
+                            directory: false,
+                            modified_ms: None,
+                            executable: None,
                             file_id: id.clone(),
                             relative_path: format!("sample-{size}.bin"),
                             size: Some(size),
@@ -74,9 +131,13 @@ fn main() -> anyhow::Result<()> {
         let _ = node.sync_once(&peer);
         if let Some((offer, _)) = node.incoming.lock().unwrap().take() {
             std::fs::write(out.join("received.json"), serde_json::to_vec(&offer)?)?;
-            if let Content::Files { files } = &offer.content {
+            if !offer.content.entries().is_empty() {
+                let files = offer.content.entries();
                 let received = (|| -> anyhow::Result<()> {
                     for file in files {
+                        if file.directory {
+                            continue;
+                        }
                         anyhow::ensure!(
                             file.size.unwrap_or(u64::MAX) <= 262144,
                             "acceptance size limit"
@@ -84,7 +145,7 @@ fn main() -> anyhow::Result<()> {
                         let source = RemoteSource::new(
                             node.clone(),
                             peer.clone(),
-                            offer.clone(),
+                            offer.offer_id.clone(),
                             file.clone(),
                         );
                         let mut bytes = Vec::new();

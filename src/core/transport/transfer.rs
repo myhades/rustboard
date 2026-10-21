@@ -18,17 +18,17 @@ pub(super) struct ReadConnection {
 pub(super) type SharedConnection = Arc<Mutex<ReadConnection>>;
 
 impl Node {
-    pub(super) fn begin_batch(&self, id: &str) -> Result<BatchRead> {
-        let (offer, token) = {
+    pub(crate) fn begin_batch(&self, id: &str) -> Result<BatchRead> {
+        let (device, token) = {
             let mut engine = self.engine.lock().unwrap();
-            (engine.file_offer(id)?, engine.retain_batch(id)?)
+            (engine.batch_device(id)?, engine.retain_batch(id)?)
         };
         let peer = self
             .peers
             .lock()
             .unwrap()
             .iter()
-            .find(|p| p.device() == offer.source_device)
+            .find(|p| p.device() == device)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("source peer unavailable"))?;
         let mut stream = connect(&self.identity, &peer)?;
@@ -56,7 +56,7 @@ impl Node {
 pub struct RemoteSource {
     pub node: Arc<Node>,
     pub peer: Peer,
-    pub offer: Offer,
+    pub offer_id: String,
     pub file: FileEntry,
     pub(super) connection: SharedConnection,
     pub(super) background: bool,
@@ -71,18 +71,23 @@ impl RemoteSource {
         files
             .iter()
             .map(|file| {
-                let mut source = Self::new(node.clone(), peer.clone(), offer.clone(), file.clone());
+                let mut source = Self::new(
+                    node.clone(),
+                    peer.clone(),
+                    offer.offer_id.clone(),
+                    file.clone(),
+                );
                 source.batch = Arc::clone(&batch);
                 Arc::new(source)
             })
             .collect()
     }
 
-    pub fn new(node: Arc<Node>, peer: Peer, offer: Offer, file: FileEntry) -> Self {
+    pub fn new(node: Arc<Node>, peer: Peer, offer_id: String, file: FileEntry) -> Self {
         Self {
             node,
             peer,
-            offer,
+            offer_id,
             file,
             connection: Arc::new(Mutex::new(ReadConnection::default())),
             background: false,
@@ -110,14 +115,14 @@ impl ReadAt for RemoteSource {
         {
             let mut batch = self.batch.lock().unwrap();
             if batch.is_none() {
-                *batch = Some(self.node.begin_batch(&self.offer.offer_id)?);
+                *batch = Some(self.node.begin_batch(&self.offer_id)?);
             }
         }
         let mut connection = self.connection.lock().unwrap();
         let result = (|| {
             self.node.engine.lock().unwrap().touch_file(
-                &self.offer.source_device,
-                &self.offer.offer_id,
+                &self.peer.device(),
+                &self.offer_id,
                 &self.file.file_id,
                 &self.file.version,
             )?;
@@ -154,8 +159,8 @@ impl ReadAt for RemoteSource {
                 &Message::Read {
                     background: self.background,
                     request_id: 1,
-                    source_device: self.offer.source_device.clone(),
-                    offer_id: self.offer.offer_id.clone(),
+                    source_device: self.peer.device().clone(),
+                    offer_id: self.offer_id.clone(),
                     file_id: self.file.file_id.clone(),
                     version: self.file.version.clone(),
                     offset,

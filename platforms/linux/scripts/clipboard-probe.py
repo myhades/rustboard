@@ -25,19 +25,24 @@ else:
         _fields_ = [("target", c.c_char_p), ("flags", c.c_uint), ("info", c.c_uint)]
     callback_type = c.CFUNCTYPE(None, c.c_void_p, c.c_void_p, c.c_uint, c.c_void_p)
     gtk.gtk_clipboard_set_with_data.argtypes = [c.c_void_p, c.POINTER(Target), c.c_uint, callback_type, c.c_void_p, c.c_void_p]
-    mime = sys.argv[2].encode()
-    data = pathlib.Path(sys.argv[3]).read_bytes()
-    assert len(data) <= 262144
-    buffer = c.create_string_buffer(data)
-    atom = gdk.gdk_atom_intern(mime, 0)
+    if sys.argv[1] == "set-many":
+        import json, base64
+        values = [(m.encode(), base64.b64decode(b)) for m,b in json.loads(pathlib.Path(sys.argv[2]).read_text()).items()]
+        seconds = float(sys.argv[3]) if len(sys.argv)>3 else 30
+    else:
+        values = [(sys.argv[2].encode(), pathlib.Path(sys.argv[3]).read_bytes())]
+        seconds = float(sys.argv[4]) if len(sys.argv)>4 else 30
+    assert 0 < len(values) <= 4 and sum(len(data) for _,data in values) <= 4*1024*1024
+    buffers = [c.create_string_buffer(data) for _,data in values]
+    atoms = [gdk.gdk_atom_intern(mime, 0) for mime,_ in values]
     @callback_type
     def provide(_, selection, info, user):
-        gtk.gtk_selection_data_set(selection, atom, 8, buffer, len(data))
+        gtk.gtk_selection_data_set(selection, atoms[info], 8, buffers[info], len(values[info][1]))
     clipboard = gtk.gtk_clipboard_get(gdk.gdk_atom_intern(b"CLIPBOARD", 0))
-    target = Target(mime, 0, 0)
-    assert gtk.gtk_clipboard_set_with_data(clipboard, c.byref(target), 1, provide, None, None)
+    targets = (Target * len(values))(*(Target(mime,0,i) for i,(mime,_) in enumerate(values)))
+    assert gtk.gtk_clipboard_set_with_data(clipboard, targets, len(values), provide, None, None)
     print("ready", flush=True)
-    deadline = time.monotonic() + (float(sys.argv[4]) if len(sys.argv) > 4 else 30)
+    deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         while Gtk.events_pending():
             Gtk.main_iteration_do(False)

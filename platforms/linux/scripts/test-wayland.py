@@ -129,9 +129,27 @@ try:
     import base64
     png=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=')
     old=received['offer_id'];publish('image/png',png)
-    received=wait(lambda:(v if (v:=read(peerout/'received.json'))['offer_id']!=old and v['content'].get('files') else None))
-    target=peerout/('received-'+received['content']['files'][0]['file_id']);wait(target.exists);assert target.read_bytes()==png
-    print('PASS image copied as ordinary file',flush=True)
+    received=wait(lambda:(v if (v:=read(peerout/'received.json'))['offer_id']!=old and v['content'].get('image') else None))
+    target=peerout/('received-'+received['content']['image']['file_id']);wait(target.exists);assert target.read_bytes()==png
+    print('PASS native PNG capture',flush=True)
+    rich=dict(kind='text',text='Rich text 中文',html='<b>Rich text 中文</b>',rtf=__import__('base64').b64encode(b'{\\rtf1 Rich text}').decode())
+    (peerout/'content.json').write_text(json.dumps(rich));command.write_text('content')
+    wait(lambda:get('text/html').stdout==rich['html'].encode());assert get('text/rtf').stdout==b'{\\rtf1 Rich text}'
+    print('PASS native HTML and RTF publication',flush=True)
+    (peerout/'image.png').write_bytes(png);command.write_text('image')
+    wait(lambda:get('image/png').stdout==(peerout/'image.png').read_bytes());assert get('text/uri-list').returncode!=0
+    print('PASS native PNG publication',flush=True)
+    command.write_text('directory')
+    uris=wait(lambda:(r.stdout.decode().strip().splitlines() if (r:=get('text/uri-list')).returncode==0 and 'tree' in r.stdout.decode() else None))
+    tree=pathlib.Path(__import__('urllib.parse',fromlist=['unquote']).unquote(uris[0].removeprefix('file://')))
+    assert (tree/'empty').is_dir() and (tree/'nested/run').stat().st_size==4096
+    assert read(peerout/'reads.json')==[0]
+    import shutil
+    shutil.copytree(tree,out/'copied-tree')
+    assert (out/'copied-tree/empty').is_dir() and (out/'copied-tree/nested/run').read_bytes()==bytes(i%251 for i in range(4096))
+    assert int((out/'copied-tree/nested/run').stat().st_mtime)==1700000000
+    assert (out/'copied-tree/nested/run').stat().st_mode & 0o100
+    print('PASS lazy directory copy, empty directory and file attributes',flush=True)
     if backend=='kwin':
         destination=out/'dolphin-destination';destination.mkdir();paste_action=dolphin_window(destination)
         command.write_text('files\n')

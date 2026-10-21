@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import IOKit.pwr_mgt
 
 private var observed = -1
@@ -20,11 +21,16 @@ private var owned = -1
     var value: [String: Any] = ["kind": "unsupported"]
     // Read file URL metadata only, never promise/file contents.
     if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-        if urls.count <= 256 { value = ["kind": "files", "paths": urls.map(\.path)] }
-    } else if board.types?.contains(.png) == true || board.types?.contains(.tiff) == true {
+        if urls.count <= 10000 { value = ["kind": "files", "paths": urls.map(\.path)] }
+    } else if !(board.types?.contains(.html) ?? false), !(board.types?.contains(.rtf) ?? false),
+              board.types?.contains(.png) == true || board.types?.contains(.tiff) == true || board.types?.contains(.init("public.jpeg")) == true {
         value = ["kind": "image"]
-    } else if let text = board.string(forType: .string), text.utf8.count <= 262144, !text.contains("\0") {
+    } else if board.types?.contains(.string) == true || board.types?.contains(.html) == true || board.types?.contains(.rtf) == true {
+        let text = board.string(forType: .string) ?? ""
+        guard text.utf8.count <= 4194304, !text.contains("\0") else {return nil}
         value = ["kind": "text", "text": text]
+        if let html = board.string(forType: .html), html.utf8.count <= 4194304 {value["html"] = html}
+        if let rtf = board.data(forType: .rtf), rtf.count <= 4194304 {value["rtf"] = rtf.base64EncodedString()}
     }
     guard board.changeCount == sequence, let data = try? JSONSerialization.data(withJSONObject: value), let string = String(data: data, encoding: .utf8) else { return nil }
     return strdup(string)
@@ -33,7 +39,13 @@ private var owned = -1
     guard let data = String(cString: json).data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return -1 }
     let board = NSPasteboard.general
     let objects: [NSPasteboardWriting]
-    if let text = obj["text"] as? String { objects = [text as NSString] }
+    if let text = obj["text"] as? String {
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        if let html = obj["html"] as? String {item.setString(html, forType: .html)}
+        if let rtf = obj["rtf"] as? String, let bytes = Data(base64Encoded: rtf) {item.setData(bytes, forType: .rtf)}
+        objects = [item]
+    }
     else if let paths = obj["paths"] as? [String] { objects = paths.map { NSURL(fileURLWithPath: $0) } }
     else { return -1 }
     board.clearContents()
@@ -67,14 +79,27 @@ private var owned = -1
     return rbAdoptOwned(sequence)
 }
 
-// Preserve encoded clipboard images as ordinary files, without decoding pixels.
+// Keep PNG/JPEG bytes; only TIFF needs a system-codec conversion for other platforms.
 // Called on the same AppKit thread immediately after rb_capture returned image.
 @_cdecl("rb_capture_image_file") public func rbCaptureImageFile(_ stem: UnsafePointer<CChar>) -> Int32 {
     let board = NSPasteboard.general
     guard board.changeCount == observed else {return -1}
-    for (type, ext, code) in [(NSPasteboard.PasteboardType.png, "png", Int32(1)), (.tiff, "tiff", Int32(2))] {
+    for (type, ext, code) in [(NSPasteboard.PasteboardType.png, "png", Int32(1)), (.init("public.jpeg"), "jpg", Int32(2)), (.tiff, "png", Int32(1))] {
         guard board.types?.contains(type) == true else {continue}
-        guard let data = board.data(forType: type), !data.isEmpty, data.count <= 64 * 1024 * 1024 else {return -1}
+        guard var data = board.data(forType: type), !data.isEmpty, data.count <= 64 * 1024 * 1024 else {return -1}
+        if type == .tiff {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int,
+                  width > 0, height > 0, width <= 16777216 / height,
+                  let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCache: false] as CFDictionary) else {return -1}
+            let output = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(output, "public.png" as CFString, 1, nil) else {return -1}
+            CGImageDestinationAddImage(destination, image, nil)
+            guard CGImageDestinationFinalize(destination), output.length <= 64 * 1024 * 1024 else {return -1}
+            data = output as Data
+        }
         let url = URL(fileURLWithPath: String(cString: stem) + "." + ext)
         do {
             try data.write(to: url, options: .withoutOverwriting)
@@ -95,4 +120,15 @@ private var owned = -1
         nil, nil, nil, 5,
         kIOPMAssertionTimeoutActionRelease as CFString,
         &assertion)
+}
+
+@_cdecl("rb_publish_image") public func rbPublishImage(_ bytes: UnsafePointer<UInt8>, _ count: Int, _ jpeg: Int32) -> Int32 {
+    guard count > 0, count <= 64 * 1024 * 1024 else {return -1}
+    let item = NSPasteboardItem()
+    item.setData(Data(bytes: bytes, count: count), forType: jpeg == 0 ? .png : .init("public.jpeg"))
+    let board = NSPasteboard.general
+    board.clearContents()
+    let ok = board.writeObjects([item])
+    owned = board.changeCount; observed = owned
+    return ok ? 0 : -1
 }

@@ -46,6 +46,8 @@ fn main() -> anyhow::Result<()> {
                     node.engine.lock().unwrap().local(
                         Content::Text {
                             text: "Rustboard TLS Unicode 验证 🦀".into(),
+                            html: None,
+                            rtf: None,
                         },
                         HashMap::new(),
                     )?;
@@ -70,6 +72,9 @@ fn main() -> anyhow::Result<()> {
                         let id = new_id();
                         let source = Arc::new(PatternSource::new(size));
                         files.push(FileEntry {
+                            directory: false,
+                            modified_ms: None,
+                            executable: None,
                             file_id: id.clone(),
                             relative_path: format!("rustboard-tls-{size}.bin"),
                             size: Some(size),
@@ -114,8 +119,12 @@ fn main() -> anyhow::Result<()> {
                     files.len() == 1 && files[0].size == Some(4096),
                     "fixture accepts only synthetic 4KiB"
                 );
-                let remote =
-                    RemoteSource::new(node.clone(), peer.clone(), offer.clone(), files[0].clone());
+                let remote = RemoteSource::new(
+                    node.clone(),
+                    peer.clone(),
+                    offer.offer_id.clone(),
+                    files[0].clone(),
+                );
                 let mut bytes = vec![0; 4096];
                 let count = remote.read_at(0, &mut bytes)?;
                 anyhow::ensure!(count == bytes.len(), "short fixture read");

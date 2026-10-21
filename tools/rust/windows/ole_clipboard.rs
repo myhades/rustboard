@@ -30,6 +30,8 @@ fn main() -> anyhow::Result<()> {
     }
     let _ole = OleGuard;
     let object = virtual_files::create(vec![PresentedFile {
+        directory: false,
+        modified_ms: None,
         name: format!("rustboard-{size}.bin"),
         source: source.clone(),
     }])?;

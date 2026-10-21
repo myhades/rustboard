@@ -24,6 +24,7 @@ const MAX_ACTIVE_BATCHES: usize = 8;
 struct FileBatch {
     offer: Offer,
     sources: HashMap<String, Arc<dyn ReadAt>>,
+    entries: HashMap<String, usize>,
     readers: Weak<()>,
 }
 pub struct Engine {
@@ -118,7 +119,7 @@ impl Engine {
         sources: HashMap<String, Arc<dyn ReadAt>>,
     ) -> Result<()> {
         self.expire();
-        if matches!(offer.content, Content::Files { .. }) {
+        if !offer.content.entries().is_empty() {
             ensure!(
                 self.batches
                     .values()
@@ -138,7 +139,7 @@ impl Engine {
                 .into_iter()
                 .sum();
             ensure!(
-                size + total < MAX_FRAME / 2,
+                size + total <= MAX_FRAME - MAX_MANIFEST,
                 "file metadata capacity reached"
             );
             self.batches.insert(
@@ -146,11 +147,32 @@ impl Engine {
                 FileBatch {
                     offer: offer.clone(),
                     sources,
+                    entries: offer
+                        .content
+                        .entries()
+                        .iter()
+                        .enumerate()
+                        .map(|(index, f)| (f.file_id.clone(), index))
+                        .collect(),
                     readers: Weak::new(),
                 },
             );
         }
         Ok(())
+    }
+    pub fn retained_ids(&mut self) -> Vec<String> {
+        self.expire();
+        self.batches.keys().cloned().collect()
+    }
+    pub fn batch_device(&mut self, id: &str) -> Result<String> {
+        self.expire();
+        Ok(self
+            .batches
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("file offer expired"))?
+            .offer
+            .source_device
+            .clone())
     }
     pub fn retained_offers(&mut self) -> Vec<Offer> {
         self.expire();
@@ -178,26 +200,49 @@ impl Engine {
             .get_mut(offer)
             .ok_or_else(|| anyhow::anyhow!("file offer expired"))?;
         ensure!(batch.offer.source_device == device, "source mismatch");
-        let Content::Files { files } = &batch.offer.content else {
-            anyhow::bail!("not files")
-        };
         ensure!(
-            files
-                .iter()
-                .any(|f| f.file_id == file && f.version == version),
+            batch.entries.get(file).is_some_and(|i| {
+                let f = &batch.offer.content.entries()[*i];
+                !f.directory && f.version == version
+            }),
             "file/version mismatch"
         );
         Ok(())
     }
+    pub fn file_entry(
+        &mut self,
+        offer: &str,
+        file: &str,
+        version: &str,
+    ) -> Result<(String, FileEntry)> {
+        self.expire();
+        let batch = self
+            .batches
+            .get(offer)
+            .ok_or_else(|| anyhow::anyhow!("file offer expired"))?;
+        let entry = batch
+            .entries
+            .get(file)
+            .map(|i| &batch.offer.content.entries()[*i])
+            .filter(|f| !f.directory && f.version == version)
+            .ok_or_else(|| anyhow::anyhow!("version_changed"))?;
+        Ok((batch.offer.source_device.clone(), entry.clone()))
+    }
     pub fn local(
         &mut self,
-        content: Content,
+        mut content: Content,
         sources: HashMap<String, Arc<dyn ReadAt>>,
     ) -> Result<Offer> {
         ensure!(
             !self.text_only || matches!(content, Content::Text { .. }),
             "text-only mode"
         );
+        if self.text_only
+            && let Content::Text { html, rtf, .. } = &mut content
+        {
+            *html = None;
+            *rtf = None;
+        }
         self.clock = self
             .clock
             .checked_add(1)
@@ -222,7 +267,7 @@ impl Engine {
         self.expire();
         Ok(offer)
     }
-    pub fn accept(&mut self, offer: Offer, authenticated_device: &str) -> Result<bool> {
+    pub fn accept(&mut self, mut offer: Offer, authenticated_device: &str) -> Result<bool> {
         offer.validate(now_ms())?;
         ensure!(
             offer.source_device == authenticated_device && offer.source_device != self.device_id,
@@ -232,6 +277,12 @@ impl Engine {
             !self.text_only || matches!(offer.content, Content::Text { .. }),
             "text-only mode"
         );
+        if self.text_only
+            && let Content::Text { html, rtf, .. } = &mut offer.content
+        {
+            *html = None;
+            *rtf = None;
+        }
         ensure!(offer.event_sequence < u64::MAX - 1, "clock exhausted");
         self.clock = self.clock.max(offer.event_sequence);
         if self.watermark.as_ref().is_some_and(|(seq, device, id)| {
@@ -289,6 +340,9 @@ mod tests {
     fn batch(engine: &mut Engine) -> Offer {
         let files: Vec<_> = (0..2)
             .map(|_| FileEntry {
+                directory: false,
+                modified_ms: None,
+                executable: None,
                 file_id: new_id(),
                 relative_path: new_id(),
                 size: Some(4),
@@ -306,6 +360,29 @@ mod tests {
             })
             .collect();
         engine.local(Content::Files { files }, sources).unwrap()
+    }
+    #[test]
+    fn text_mode_keeps_only_the_plain_text_representation() {
+        let mut a = Engine::new(new_id());
+        let mut b = Engine::new(new_id());
+        b.text_only = true;
+        let offer = a
+            .local(
+                Content::Text {
+                    text: "hello".into(),
+                    html: Some("<b>hello</b>".into()),
+                    rtf: None,
+                },
+                HashMap::new(),
+            )
+            .unwrap();
+        b.accept(offer.clone(), &a.device_id).unwrap();
+        assert_eq!(b.current.unwrap().content, Content::text("hello"));
+        a.text_only = true;
+        assert_eq!(
+            a.local(offer.content, HashMap::new()).unwrap().content,
+            Content::text("hello")
+        );
     }
     #[test]
     fn only_current_and_owned_transfers_survive_replacement() {
@@ -356,6 +433,8 @@ mod tests {
             .local(
                 Content::Text {
                     text: "previous".into(),
+                    html: None,
+                    rtf: None,
                 },
                 HashMap::new(),
             )
@@ -382,6 +461,8 @@ mod tests {
             .local(
                 Content::Text {
                     text: "first copy after pairing".into(),
+                    html: None,
+                    rtf: None,
                 },
                 HashMap::new(),
             )
@@ -414,6 +495,8 @@ mod tests {
             .local(
                 Content::Text {
                     text: "before".into(),
+                    html: None,
+                    rtf: None,
                 },
                 HashMap::new(),
             )
@@ -423,6 +506,8 @@ mod tests {
             .local(
                 Content::Text {
                     text: "remote".into(),
+                    html: None,
+                    rtf: None,
                 },
                 HashMap::new(),
             )
@@ -438,6 +523,8 @@ mod tests {
             .local(
                 Content::Text {
                     text: "after".into(),
+                    html: None,
+                    rtf: None,
                 },
                 HashMap::new(),
             )
@@ -496,10 +583,24 @@ mod tests {
         let mut a = Engine::new(new_id());
         let mut b = Engine::new(new_id());
         let oa = a
-            .local(Content::Text { text: "a".into() }, HashMap::new())
+            .local(
+                Content::Text {
+                    text: "a".into(),
+                    html: None,
+                    rtf: None,
+                },
+                HashMap::new(),
+            )
             .unwrap();
         let ob = b
-            .local(Content::Text { text: "b".into() }, HashMap::new())
+            .local(
+                Content::Text {
+                    text: "b".into(),
+                    html: None,
+                    rtf: None,
+                },
+                HashMap::new(),
+            )
             .unwrap();
         a.accept(ob.clone(), &b.device_id).unwrap();
         b.accept(oa.clone(), &a.device_id).unwrap();

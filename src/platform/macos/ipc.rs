@@ -223,6 +223,9 @@ mod tests {
         let source = Arc::new(PatternSource::new(4096));
         let id = new_id();
         let file = FileEntry {
+            directory: false,
+            modified_ms: None,
+            executable: None,
             file_id: id.clone(),
             relative_path: "sample.bin".into(),
             size: Some(4096),

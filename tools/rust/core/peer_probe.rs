@@ -31,7 +31,12 @@ fn main() -> Result<()> {
         anyhow::bail!("not files")
     };
     for file in files {
-        let source = RemoteSource::new(node.clone(), peers[0].clone(), offer.clone(), file.clone());
+        let source = RemoteSource::new(
+            node.clone(),
+            peers[0].clone(),
+            offer.offer_id.clone(),
+            file.clone(),
+        );
         let mut bytes = vec![0; 4096];
         let n = source.read_at(0, &mut bytes)?;
         anyhow::ensure!(

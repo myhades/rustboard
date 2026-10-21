@@ -6,9 +6,12 @@ mod x11;
 use anyhow::{Result, ensure};
 use std::path::{Path, PathBuf};
 
-const MIMES: [&str; 7] = [
+const MIMES: [&str; 10] = [
     "text/uri-list",
     "x-special/gnome-copied-files",
+    "text/html",
+    "text/rtf",
+    "application/rtf",
     "image/png",
     "image/jpeg",
     "text/plain;charset=utf-8",
@@ -17,7 +20,7 @@ const MIMES: [&str; 7] = [
 ];
 
 pub enum Captured {
-    Text(String),
+    Text(crate::core::Content),
     Files(Vec<PathBuf>),
     Image(Vec<u8>, &'static str),
     Unsupported,
@@ -51,11 +54,38 @@ impl Clipboard {
             Self::DataControl(c) => c.poll(),
         }
     }
-    pub fn publish_text(&mut self, text: &str) -> Result<()> {
+    pub fn publish_content(
+        &mut self,
+        content: &crate::core::Content,
+        image: Option<Vec<u8>>,
+    ) -> Result<()> {
+        use base64::Engine;
+        use std::{collections::HashMap, sync::Arc};
+        let mut formats = HashMap::new();
+        match content {
+            crate::core::Content::Text { text, html, rtf } => {
+                let bytes = Arc::new(text.as_bytes().to_vec());
+                for mime in ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"] {
+                    formats.insert(mime.into(), bytes.clone());
+                }
+                if let Some(html) = html {
+                    formats.insert("text/html".into(), Arc::new(html.as_bytes().to_vec()));
+                }
+                if let Some(rtf) = rtf {
+                    let bytes = Arc::new(base64::prelude::BASE64_STANDARD.decode(rtf)?);
+                    formats.insert("text/rtf".into(), bytes.clone());
+                    formats.insert("application/rtf".into(), bytes);
+                }
+            }
+            crate::core::Content::Image { image: entry } => {
+                formats.insert(entry.media_type.clone(), Arc::new(image.unwrap()));
+            }
+            _ => anyhow::bail!("not clipboard data"),
+        }
         match self {
-            Self::X11(c) => c.publish_text(text),
-            Self::Gnome(c) => c.publish_text(text),
-            Self::DataControl(c) => c.publish_text(text),
+            Self::X11(c) => c.publish_formats(formats),
+            Self::Gnome(c) => c.publish_formats(formats),
+            Self::DataControl(c) => c.publish_formats(formats),
         }
     }
     pub fn publish_files(&mut self, paths: &[PathBuf]) -> Result<()> {
@@ -74,6 +104,49 @@ impl Clipboard {
     }
 }
 
+fn capture_types(types: &[&str]) -> Vec<&'static str> {
+    let first = |names: &[&'static str]| names.iter().copied().find(|m| types.contains(m));
+    if let Some(mime) = first(&MIMES[..2]) {
+        return vec![mime];
+    }
+    let html = first(&["text/html"]);
+    let rtf = first(&["text/rtf", "application/rtf"]);
+    if html.is_none()
+        && rtf.is_none()
+        && let Some(mime) = first(&["image/png", "image/jpeg"])
+    {
+        return vec![mime];
+    }
+    first(&["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"])
+        .into_iter()
+        .chain(html)
+        .chain(rtf)
+        .collect()
+}
+fn merge(captured: &mut Option<Captured>, value: Captured) {
+    if let (
+        Some(Captured::Text(crate::core::Content::Text { text, html, rtf })),
+        Captured::Text(crate::core::Content::Text {
+            text: other,
+            html: h,
+            rtf: r,
+        }),
+    ) = (&mut *captured, &value)
+    {
+        if !other.is_empty() {
+            *text = other.clone();
+        }
+        if h.is_some() {
+            *html = h.clone();
+        }
+        if r.is_some() {
+            *rtf = r.clone();
+        }
+    } else {
+        *captured = Some(value);
+    }
+}
+
 fn capture(mime: &str, bytes: Vec<u8>) -> Result<Captured> {
     ensure!(
         bytes.len() <= crate::app::image_file::MAX_IMAGE_BYTES,
@@ -84,21 +157,41 @@ fn capture(mime: &str, bytes: Vec<u8>) -> Result<Captured> {
         "image/jpeg" => return Ok(Captured::Image(bytes, "jpg")),
         _ => {}
     }
+    if matches!(mime, "text/rtf" | "application/rtf") {
+        use base64::Engine;
+        ensure!(bytes.len() <= crate::core::MAX_TEXT, "rich text too large");
+        return Ok(Captured::Text(crate::core::Content::Text {
+            text: String::new(),
+            html: None,
+            rtf: Some(base64::prelude::BASE64_STANDARD.encode(bytes)),
+        }));
+    }
     let text = String::from_utf8(bytes)?;
+    if mime == "text/html" {
+        ensure!(
+            text.len() <= crate::core::MAX_TEXT && !text.contains('\0'),
+            "HTML too large"
+        );
+        return Ok(Captured::Text(crate::core::Content::Text {
+            text: String::new(),
+            html: Some(text),
+            rtf: None,
+        }));
+    }
     if matches!(mime, "text/uri-list" | "x-special/gnome-copied-files") {
         let paths = text
             .lines()
             .filter(|s| !s.is_empty() && !s.starts_with('#') && *s != "copy" && *s != "cut")
             .map(parse_uri)
             .collect::<Result<Vec<_>>>()?;
-        ensure!(paths.len() <= 256, "too many files");
+        ensure!(paths.len() <= crate::core::MAX_FILES, "too many files");
         return Ok(Captured::Files(paths));
     }
     ensure!(
-        text.len() <= 262144 && !text.contains('\0'),
+        text.len() <= crate::core::MAX_TEXT && !text.contains('\0'),
         "invalid clipboard text"
     );
-    Ok(Captured::Text(text))
+    Ok(Captured::Text(crate::core::Content::text(text)))
 }
 
 pub fn uri(path: &Path) -> String {
@@ -145,6 +238,30 @@ fn parse_uri(value: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn representations_are_grouped_without_converting_content() {
+        let types = capture_types(&["image/png", "text/html", "text/plain", "text/rtf"]);
+        assert_eq!(types, ["text/plain", "text/html", "text/rtf"]);
+        assert_eq!(
+            capture_types(&["text/uri-list", "image/png"]),
+            ["text/uri-list"]
+        );
+        assert_eq!(capture_types(&["image/png", "text/plain"]), ["image/png"]);
+        let mut result = None;
+        for (mime, bytes) in [
+            ("text/html", b"<b>hello</b>".as_slice()),
+            ("text/plain", b"hello"),
+            ("text/rtf", b"{\\rtf1 hello}"),
+        ] {
+            merge(&mut result, capture(mime, bytes.to_vec()).unwrap());
+        }
+        let Some(Captured::Text(crate::core::Content::Text { text, html, rtf })) = result else {
+            panic!()
+        };
+        assert_eq!(text, "hello");
+        assert_eq!(html.as_deref(), Some("<b>hello</b>"));
+        assert!(rtf.is_some());
+    }
     #[test]
     fn file_uri_roundtrip_and_rejection() {
         let path = Path::new("/tmp/中文 # % image.png");

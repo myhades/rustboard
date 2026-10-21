@@ -23,17 +23,11 @@ struct State {
     self_sequence: u32,
     pending: bool,
     images: PathBuf,
+    download: crate::app::image_file::Download,
 }
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
 
-pub struct WindowsBackend {
-    window: HWND,
-}
-impl WindowsBackend {
-    fn publish_text(&mut self, text: &str) -> anyhow::Result<()> {
-        set_text(self.window, text)
-    }
-}
+pub struct WindowsBackend;
 impl WindowsBackend {
     fn publish_files(&mut self, files: Vec<PresentedFile>) -> anyhow::Result<()> {
         let object = virtual_files::create(files)?;
@@ -66,36 +60,115 @@ impl Drop for ClipboardGuard {
 }
 
 pub fn set_text(window: HWND, text: &str) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        !text.contains('\0') && text.len() <= 256 * 1024,
-        "invalid text"
-    );
-    let encoded: Vec<u8> = text
-        .encode_utf16()
-        .chain(Some(0))
-        .flat_map(u16::to_le_bytes)
-        .collect();
-    let _guard = ClipboardGuard::open(window)?;
-    unsafe {
-        EmptyClipboard()?;
-        let memory = virtual_files::global_bytes(&encoded)?;
-        if let Err(error) = SetClipboardData(13, Some(HANDLE(memory.0))) {
-            let _ = GlobalFree(Some(memory));
-            return Err(error.into());
+    set_rich_text(window, text, None, None)
+}
+fn set_formats(window: HWND, formats: Vec<(u32, Vec<u8>)>) -> anyhow::Result<()> {
+    // Allocate before replacing the clipboard, so allocation failure preserves its contents.
+    let mut blocks = Vec::new();
+    for (format, bytes) in formats {
+        match virtual_files::global_bytes(&bytes) {
+            Ok(memory) => blocks.push((format, memory)),
+            Err(error) => {
+                for (_, memory) in blocks {
+                    unsafe {
+                        let _ = GlobalFree(Some(memory));
+                    }
+                }
+                return Err(error.into());
+            }
         }
     }
-    drop(_guard); // Windows finalizes the clipboard sequence when the owner closes it.
-    STATE.with_borrow_mut(|s| {
-        s.self_sequence = unsafe { GetClipboardSequenceNumber() };
-        s.remote_object = None;
-        s.remote_offer = None;
-    });
-    Ok(())
+    let result = (|| -> anyhow::Result<()> {
+        let _guard = ClipboardGuard::open(window)?;
+        unsafe {
+            EmptyClipboard()?;
+            for (format, memory) in &mut blocks {
+                SetClipboardData(*format, Some(HANDLE(memory.0)))?;
+                *memory = HGLOBAL::default();
+            }
+        }
+        Ok(())
+    })();
+    for (_, memory) in blocks {
+        if !memory.is_invalid() {
+            unsafe {
+                let _ = GlobalFree(Some(memory));
+            }
+        }
+    }
+    if result.is_ok() {
+        STATE.with_borrow_mut(|s| {
+            s.self_sequence = unsafe { GetClipboardSequenceNumber() };
+            s.remote_object = None;
+            s.remote_offer = None;
+        });
+    }
+    result
+}
+fn set_rich_text(
+    window: HWND,
+    text: &str,
+    html: Option<&str>,
+    rtf: Option<&str>,
+) -> anyhow::Result<()> {
+    use base64::Engine;
+    let mut formats = vec![(
+        13,
+        text.encode_utf16()
+            .chain(Some(0))
+            .flat_map(u16::to_le_bytes)
+            .collect(),
+    )];
+    if let Some(html) = html {
+        formats.push((
+            unsafe { RegisterClipboardFormatW(w!("HTML Format")) },
+            super::html::encode(html),
+        ));
+    }
+    if let Some(rtf) = rtf {
+        let mut bytes = base64::prelude::BASE64_STANDARD.decode(rtf)?;
+        bytes.push(0);
+        formats.push((
+            unsafe { RegisterClipboardFormatW(w!("Rich Text Format")) },
+            bytes,
+        ));
+    }
+    set_formats(window, formats)
+}
+fn set_image(window: HWND, mime: &str, bytes: &[u8]) -> anyhow::Result<()> {
+    let dib = super::image_file::dib(bytes);
+    let format = unsafe {
+        RegisterClipboardFormatW(if mime == "image/png" {
+            w!("PNG")
+        } else {
+            w!("JFIF")
+        })
+    };
+    let mut formats = vec![(format, bytes.to_vec())];
+    if let Ok(dib) = dib {
+        formats.push((17, dib));
+    }
+    set_formats(window, formats)
+}
+fn read_bytes(format: u32, limit: usize) -> anyhow::Result<Option<Vec<u8>>> {
+    unsafe {
+        if IsClipboardFormatAvailable(format).is_err() {
+            return Ok(None);
+        }
+        let handle = HGLOBAL(GetClipboardData(format)?.0);
+        let size = GlobalSize(handle);
+        anyhow::ensure!(size <= limit, "clipboard representation too large");
+        let pointer = GlobalLock(handle);
+        anyhow::ensure!(!pointer.is_null(), "cannot lock clipboard");
+        let bytes = std::slice::from_raw_parts(pointer.cast::<u8>(), size).to_vec();
+        let _ = GlobalUnlock(handle);
+        Ok(Some(bytes))
+    }
 }
 
 /// Captured paths are local only. Never serialize them onto the wire.
 pub enum Captured {
-    Text(String),
+    Text(crate::core::Content),
     Files(Vec<PathBuf>),
     Image(super::image_file::Image),
     Unsupported,
@@ -120,28 +193,48 @@ pub fn capture(window: HWND) -> anyhow::Result<Captured> {
             }
             return Ok(Captured::Files(paths));
         }
-        match super::image_file::capture() {
-            Ok(Some(image)) => return Ok(Captured::Image(image)),
-            Err(_) => {
-                log::warn!(target: "clipboard", "clipboard image rejected: unsupported or larger than 64 MiB");
-                return Ok(Captured::Unsupported);
+        use base64::Engine;
+        let limit = crate::core::MAX_TEXT;
+        let html = read_bytes(RegisterClipboardFormatW(w!("HTML Format")), limit)
+            .ok()
+            .flatten()
+            .and_then(|b| super::html::decode(&b).ok());
+        let rtf = read_bytes(RegisterClipboardFormatW(w!("Rich Text Format")), limit)
+            .ok()
+            .flatten()
+            .map(|mut b| {
+                while b.last() == Some(&0) {
+                    b.pop();
+                }
+                base64::prelude::BASE64_STANDARD.encode(b)
+            });
+        if html.is_none() && rtf.is_none() {
+            match super::image_file::capture() {
+                Ok(Some(image)) => return Ok(Captured::Image(image)),
+                Err(error) => {
+                    log::warn!(target: "clipboard", "clipboard image rejected: {error}");
+                    return Ok(Captured::Unsupported);
+                }
+                Ok(None) => {}
             }
-            Ok(None) => {}
         }
-        if IsClipboardFormatAvailable(13).is_ok() {
-            let handle = HGLOBAL(GetClipboardData(13)?.0);
-            let size = GlobalSize(handle);
-            anyhow::ensure!(
-                size <= 512 * 1024 + 2 && size.is_multiple_of(2),
-                "invalid clipboard text size"
-            );
-            let pointer = GlobalLock(handle);
-            anyhow::ensure!(!pointer.is_null(), "cannot lock clipboard");
-            let buffer = std::slice::from_raw_parts(pointer.cast::<u16>(), size / 2);
-            let end = buffer.iter().position(|&v| v == 0).unwrap_or(buffer.len());
-            let text = String::from_utf16(&buffer[..end]);
-            let _ = GlobalUnlock(handle);
-            return Ok(Captured::Text(text?));
+        let bytes = read_bytes(13, limit * 2 + 2)?;
+        if bytes.is_some() || html.is_some() || rtf.is_some() {
+            let bytes = bytes.unwrap_or_default();
+            anyhow::ensure!(bytes.len().is_multiple_of(2), "invalid clipboard text");
+            let utf16: Vec<_> = bytes
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                .take_while(|c| *c != 0)
+                .collect();
+            let text = String::from_utf16(&utf16)?;
+            return Ok(Captured::Text(crate::core::Content::Text {
+                text,
+                html,
+                rtf,
+            }));
         }
     }
     Ok(Captured::Unsupported)
@@ -171,16 +264,15 @@ fn update(window: HWND) {
                 s.remote_offer = None;
             });
             match content {
-                Captured::Text(text) => {
-                    STATE.with_borrow_mut(|s| {
+                Captured::Text(content) => {
+                    STATE.with_borrow(|s| {
                         if let Some(node) = &s.node {
-                            let _ = node.engine.lock().unwrap().local(
-                                crate::core::Content::Text { text: text.clone() },
-                                Default::default(),
-                            );
+                            let mut engine = node.engine.lock().unwrap();
+                            if engine.local(content, Default::default()).is_err() {
+                                engine.clear_clipboard();
+                            }
                         }
                     });
-                    log::debug!(target: "clipboard", "text captured bytes={}", text.len());
                 }
                 Captured::Files(paths) => {
                     STATE.with_borrow(|s| {
@@ -206,9 +298,9 @@ fn update(window: HWND) {
                                 .and_then(|path| crate::app::image_file::offer(&mut engine, path));
                             if result.is_err() {
                                 engine.clear_clipboard();
-                                log::warn!(target: "clipboard", "clipboard image-to-file rejected");
+                                log::warn!(target: "clipboard", "clipboard image rejected");
                             } else {
-                                log::debug!(target: "clipboard", "image published as file");
+                                log::debug!(target: "clipboard", "image captured");
                             }
                         }
                     });
@@ -388,8 +480,15 @@ fn tick(window: HWND) {
             s.remote_offer = None;
         });
     }
-    let incoming = node.incoming.lock().unwrap().take();
-    if let Some((offer, peer)) = incoming {
+    let incoming = STATE.with_borrow_mut(|s| s.download.poll(&node));
+    let incoming = match incoming {
+        Ok(value) => value,
+        Err(error) => {
+            log::warn!(target: "clipboard", "image download failed: {error}");
+            return;
+        }
+    };
+    if let Some((offer, peer, image_bytes)) = incoming {
         let current = node
             .engine
             .lock()
@@ -401,9 +500,14 @@ fn tick(window: HWND) {
             return;
         }
         let result = (|| -> anyhow::Result<()> {
-            let mut backend = WindowsBackend { window };
+            let mut backend = WindowsBackend;
             match &offer.content {
-                crate::core::Content::Text { text } => backend.publish_text(text)?,
+                crate::core::Content::Text { text, html, rtf } => {
+                    set_rich_text(window, text, html.as_deref(), rtf.as_deref())?
+                }
+                crate::core::Content::Image { image } => {
+                    set_image(window, &image.media_type, image_bytes.as_deref().unwrap())?
+                }
                 crate::core::Content::Files { files } => {
                     anyhow::ensure!(
                         files.iter().all(|f| f.size.is_some()),
@@ -418,6 +522,8 @@ fn tick(window: HWND) {
                         .iter()
                         .zip(sources)
                         .map(|(file, source)| PresentedFile {
+                            directory: file.directory,
+                            modified_ms: file.modified_ms,
                             name: file.relative_path.clone(),
                             source,
                         })

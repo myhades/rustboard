@@ -70,12 +70,15 @@ impl Node {
     }
     pub fn accept(&self, offer: Offer, peer: Peer) -> Result<()> {
         ensure!(self.trusted(&peer.fingerprint), "peer revoked");
-        if self
-            .engine
-            .lock()
-            .unwrap()
-            .accept(offer.clone(), &peer.device())?
-        {
+        let accepted = {
+            let mut engine = self.engine.lock().unwrap();
+            if engine.accept(offer, &peer.device())? {
+                engine.current.clone()
+            } else {
+                None
+            }
+        };
+        if let Some(offer) = accepted {
             *self.incoming.lock().unwrap() = Some((offer, peer));
         }
         Ok(())
@@ -235,7 +238,7 @@ impl Node {
                     let _retained = {
                         let mut engine = self.engine.lock().unwrap();
                         ensure!(
-                            engine.file_offer(&offer_id)?.source_device == engine.device_id,
+                            engine.batch_device(&offer_id)? == engine.device_id,
                             "source is not local"
                         );
                         engine.retain_batch(&offer_id)?
@@ -278,15 +281,16 @@ impl Node {
                             );
                             if transfer.as_ref().is_none_or(|(active, _)| active != &key) {
                                 drop(transfer.take());
-                                transfer = Some((
-                                    key,
-                                    if background {
-                                        None
-                                    } else {
-                                        source.transfer_guard()?
-                                    },
-                                ));
+                                let reader =
+                                    source.open_reader()?.unwrap_or_else(|| source.clone());
+                                let guard = if background {
+                                    None
+                                } else {
+                                    reader.transfer_guard()?
+                                };
+                                transfer = Some((key, (reader, guard)));
                             }
+                            let source = &transfer.as_ref().unwrap().1.0;
                             if background && source.is_empty() {
                                 source.read_background(0, &mut [])?;
                             }
@@ -429,6 +433,8 @@ use tls::{ALPN_V2, Pins};
 pub use tls::{Client, Identity, Peer, connect, device_from_pin, fingerprint};
 
 mod transfer;
+#[cfg(target_os = "linux")]
+pub(crate) use transfer::BatchRead;
 pub use transfer::RemoteSource;
 pub(crate) use transfer::SharedBatchRead;
 use transfer::{ReadConnection, SharedConnection};

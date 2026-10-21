@@ -12,6 +12,10 @@ use std::{
 
 /// Each call is bounded; implementations must return an error after cancellation/version loss.
 pub trait ReadAt: Send + Sync {
+    /// Open a reader for one active transfer; idle offers retain no file handles.
+    fn open_reader(&self) -> Result<Option<std::sync::Arc<dyn ReadAt>>> {
+        Ok(None)
+    }
     /// Held by the serving connection while this file is being read.
     fn transfer_guard(&self) -> Result<Option<File>> {
         Ok(None)

@@ -31,6 +31,9 @@ fn main() -> anyhow::Result<()> {
     let source = Arc::new(PatternSource::new(size));
     let id = new_id();
     let file = FileEntry {
+        directory: false,
+        modified_ms: None,
+        executable: None,
         file_id: id.clone(),
         relative_path: "pattern.bin".into(),
         size: Some(size),
@@ -55,7 +58,12 @@ fn main() -> anyhow::Result<()> {
             return socket_probe(&b, &source, size, &path);
         }
         for mode in ["core_tls", "local_ipc_json"] {
-            let remote = RemoteSource::new(b.clone(), peer.clone(), offer.clone(), file.clone());
+            let remote = RemoteSource::new(
+                b.clone(),
+                peer.clone(),
+                offer.offer_id.clone(),
+                file.clone(),
+            );
             let before = source.bytes_read.load(Ordering::Relaxed);
             let start = Instant::now();
             let mut offset = 0;

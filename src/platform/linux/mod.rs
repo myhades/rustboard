@@ -6,6 +6,7 @@ pub(crate) mod service;
 
 use crate::core::{Content, transport::Node};
 use anyhow::Result;
+use sha2::{Digest, Sha256};
 use std::{
     sync::{
         Arc,
@@ -73,6 +74,8 @@ pub fn run() -> Result<()> {
     node.start_sync();
     log::info!(target: "agent", "started");
     let mut presented = None;
+    let mut image_digest: Option<(String, [u8; 32])> = None;
+    let mut download = crate::app::image_file::Download::default();
     while !node.stop.load(Ordering::Acquire) && !STOP.load(Ordering::Relaxed) {
         match clipboard.poll() {
             Ok(Some(captured)) => {
@@ -81,16 +84,30 @@ pub fn run() -> Result<()> {
                 let echoed = engine.current.as_ref().is_some_and(|offer| {
                     offer.source_device != engine.device_id
                         && match (&captured, &offer.content) {
-                            (clipboard::Captured::Text(value), Content::Text { text }) => {
-                                value == text
+                            (clipboard::Captured::Text(value), content @ Content::Text { .. }) => {
+                                value == content
                             }
                             (clipboard::Captured::Files(paths), Content::Files { files }) => {
-                                paths.len() == files.len()
-                                    && files.iter().all(|file| {
-                                        paths.contains(
-                                            &mount.join(&offer.offer_id).join(&file.relative_path),
-                                        )
-                                    })
+                                paths.len()
+                                    == files
+                                        .iter()
+                                        .filter(|f| !f.relative_path.contains('/'))
+                                        .count()
+                                    && files.iter().filter(|f| !f.relative_path.contains('/')).all(
+                                        |file| {
+                                            paths.contains(
+                                                &mount
+                                                    .join(&offer.offer_id)
+                                                    .join(&file.relative_path),
+                                            )
+                                        },
+                                    )
+                            }
+                            (clipboard::Captured::Image(bytes, _), Content::Image { .. }) => {
+                                image_digest.as_ref().is_some_and(|(id, digest)| {
+                                    id == &offer.offer_id
+                                        && *digest == <[u8; 32]>::from(Sha256::digest(bytes))
+                                })
                             }
                             _ => false,
                         }
@@ -99,9 +116,9 @@ pub fn run() -> Result<()> {
                     continue;
                 }
                 let result = match captured {
-                    clipboard::Captured::Text(text) => engine
-                        .local(Content::Text { text }, Default::default())
-                        .map(|_| ()),
+                    clipboard::Captured::Text(text) => {
+                        engine.local(text, Default::default()).map(|_| ())
+                    }
                     clipboard::Captured::Files(paths) if !engine.text_only => {
                         files::offer(&mut engine, paths, &mount)
                     }
@@ -135,19 +152,31 @@ pub fn run() -> Result<()> {
             engine.expire();
             engine.current.as_ref().map(|o| o.offer_id.clone())
         };
-        if presented.is_some() && presented != current {
+        if presented.is_some() && current.is_none() {
             clipboard.clear_owned()?;
             presented = None;
         }
-        let incoming = node.incoming.lock().unwrap().take();
-        if let Some((offer, _)) = incoming
+        let incoming = match download.poll(&node) {
+            Ok(value) => value,
+            Err(error) => {
+                log::warn!(target: "clipboard", "image download failed: {error}");
+                None
+            }
+        };
+        if let Some((offer, _, image)) = incoming
             && current.as_ref() == Some(&offer.offer_id)
         {
+            image_digest = image
+                .as_ref()
+                .map(|bytes| (offer.offer_id.clone(), Sha256::digest(bytes).into()));
             match &offer.content {
-                Content::Text { text } => clipboard.publish_text(text)?,
+                Content::Text { .. } | Content::Image { .. } => {
+                    clipboard.publish_content(&offer.content, image)?
+                }
                 Content::Files { files } => clipboard.publish_files(
                     &files
                         .iter()
+                        .filter(|f| !f.relative_path.contains('/'))
                         .map(|f| mount.join(&offer.offer_id).join(&f.relative_path))
                         .collect::<Vec<_>>(),
                 )?,

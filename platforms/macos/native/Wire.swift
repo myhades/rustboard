@@ -4,13 +4,16 @@ import Darwin
 
 enum WireError: Error { case invalid, unavailable, stale, cancelled }
 struct FileEntry: Codable, Equatable {
+    var directory: Bool = false
+    var modified_ms: UInt64? = nil
+    var executable: Bool? = nil
     let file_id: String
     let relative_path: String
     let size: UInt64?
     let version: String
     let media_type: String
 }
-struct Content: Codable { let kind: String; let files: [FileEntry]?; let text: String? }
+struct Content: Codable { let kind: String; let files: [FileEntry]?; let text: String?; var html: String? = nil; var rtf: String? = nil; var image: FileEntry? = nil }
 struct Offer: Codable {
     let `protocol`: UInt16
     let source_device: String
@@ -18,28 +21,41 @@ struct Offer: Codable {
     let event_sequence: UInt64
     let expires_unix_ms: UInt64
     let content: Content
-    func validate(now: UInt64 = UInt64(Date().timeIntervalSince1970 * 1000), flat: Bool = true) throws {
+    func validate(now: UInt64 = UInt64(Date().timeIntervalSince1970 * 1000)) throws {
         guard `protocol` == 1, UUID(uuidString: source_device) != nil, UUID(uuidString: offer_id) != nil,
               expires_unix_ms > now, expires_unix_ms - now <= 86400000 else { throw WireError.stale }
         if content.kind == "text" {
-            guard let text = content.text, content.files == nil, text.utf8.count <= 262144, !text.contains("\0") else {throw WireError.invalid}; return
+            guard let text = content.text, content.files == nil, content.image == nil, !text.contains("\0"), !(content.html?.contains("\0") ?? false) else {throw WireError.invalid}
+            let rtf = content.rtf.flatMap {Data(base64Encoded: $0)}
+            guard content.rtf == nil || rtf != nil, text.utf8.count + (content.html?.utf8.count ?? 0) + (rtf?.count ?? 0) <= 4194304 else {throw WireError.invalid}
+            return
         }
-        guard content.kind == "files", content.text == nil, let files = content.files, !files.isEmpty, files.count <= 256 else {throw WireError.invalid}
+        if content.kind == "image" {
+            guard let image = content.image, !image.directory, let size = image.size, size > 0, size <= 64 * 1024 * 1024,
+                  ["image/png", "image/jpeg"].contains(image.media_type), UUID(uuidString: image.file_id) != nil,
+                  !image.version.isEmpty, image.version.utf8.count <= 128, validPath(image.relative_path) else {throw WireError.invalid}
+            return
+        }
+        guard content.kind == "files", content.text == nil, let files = content.files, !files.isEmpty, files.count <= 10000 else {throw WireError.invalid}
+        guard try JSONEncoder().encode(files).count <= 8 * 1024 * 1024 else {throw WireError.invalid}
+        let directories = Set(files.filter { $0.directory }.map { $0.relative_path })
         var ids = Set<String>(), names = Set<String>()
         for file in files {
+            let parent = (file.relative_path as NSString).deletingLastPathComponent
+            guard parent.isEmpty || directories.contains(parent), !file.directory || file.size == 0 else {throw WireError.invalid}
             guard UUID(uuidString: file.file_id) != nil, ids.insert(file.file_id.lowercased()).inserted,
                   names.insert(file.relative_path.lowercased()).inserted,
                   !file.version.isEmpty, file.version.utf8.count <= 128, let size = file.size, size <= Int64.max,
-                  validPath(file.relative_path), (!flat || !file.relative_path.contains("/")) else {throw WireError.invalid}
+                  file.modified_ms.map({$0 <= 253402300799999}) ?? true, file.media_type.utf8.count <= 128, validPath(file.relative_path) else {throw WireError.invalid}
         }
     }
 }
 func validPath(_ path: String) -> Bool {
-    guard !path.isEmpty, !path.contains("\\"), !path.contains(":"), !path.unicodeScalars.contains(where: {$0.value < 32 || $0.value == 127}) else {return false}
+    guard !path.isEmpty, path.utf8.count <= 1024, path.split(separator: "/").count <= 64, !path.contains("\\"), !path.contains(":"), !path.unicodeScalars.contains(where: {$0.value < 32 || $0.value == 127}) else {return false}
     for part in path.split(separator: "/", omittingEmptySubsequences: false) {
-        guard !part.isEmpty, part != ".", part != "..", !part.hasSuffix("."), !part.hasSuffix(" ") else {return false}
+        guard !part.isEmpty, !part.contains(where: {"<>\"|?*".contains($0)}), part != ".", part != "..", !part.hasSuffix("."), !part.hasSuffix(" ") else {return false}
         let base = part.split(separator: ".")[0].uppercased()
-        if ["CON","PRN","AUX","NUL","CONIN$","CONOUT$"].contains(base) {return false}
+        if ["CON","PRN","AUX","NUL","CLOCK$","CONIN$","CONOUT$"].contains(base) {return false}
         if (base.hasPrefix("COM") || base.hasPrefix("LPT")) && base.count == 4 && "123456789¹²³".contains(base.last!) {return false}
     }
     return true
@@ -77,7 +93,7 @@ struct Operation: Encodable {
     var background: Bool? = nil
 }
 struct Envelope: Encodable { let `protocol`: UInt16 = 1; let request: Operation }
-let frameLimit = 1048576
+let frameLimit = 33554432
 func frame(_ bytes: Data) throws -> Data {
     guard !bytes.isEmpty, bytes.count <= frameLimit else {throw WireError.invalid}
     let n = UInt32(bytes.count)
@@ -202,6 +218,11 @@ func hydrate(_ offer: Offer, _ file: FileEntry, to url: URL, progress: Progress,
             guard !progress.isCancelled else {throw WireError.cancelled}
         } while offset < size
         try checkTransfer()
+        if file.executable == true {guard fchmod(fd, 0o700) == 0 else {throw WireError.unavailable}}
+        if let modified = file.modified_ms {
+            var times = [timespec(tv_sec: Int(modified / 1000), tv_nsec: Int(modified % 1000) * 1000000), timespec(tv_sec: Int(modified / 1000), tv_nsec: Int(modified % 1000) * 1000000)]
+            guard futimens(fd, &times) == 0 else {throw WireError.unavailable}
+        }
         guard fsync(fd) == 0, !progress.isCancelled else {throw WireError.cancelled}
         try commit(url)
         success = true
@@ -222,8 +243,9 @@ private func checkKeys(_ decoder: Decoder, _ allowed: Set<String>) throws {
 }
 extension FileEntry {
     init(from decoder:Decoder) throws {
-        try checkKeys(decoder,["file_id","relative_path","size","version","media_type"])
+        try checkKeys(decoder,["file_id","relative_path","size","version","media_type","directory","modified_ms","executable"])
         let c=try decoder.container(keyedBy:CodingKeys.self)
+        directory=try c.decode(Bool.self,forKey:.directory);modified_ms=try c.decodeIfPresent(UInt64.self,forKey:.modified_ms);executable=try c.decodeIfPresent(Bool.self,forKey:.executable)
         file_id=try c.decode(String.self,forKey:.file_id);relative_path=try c.decode(String.self,forKey:.relative_path)
         size=try c.decodeIfPresent(UInt64.self,forKey:.size);version=try c.decode(String.self,forKey:.version);media_type=try c.decode(String.self,forKey:.media_type)
     }
@@ -231,9 +253,10 @@ extension FileEntry {
 extension Content {
     init(from decoder:Decoder) throws {
         let c=try decoder.container(keyedBy:CodingKeys.self);kind=try c.decode(String.self,forKey:.kind)
-        guard ["text","files"].contains(kind) else {throw WireError.invalid}
-        try checkKeys(decoder,kind == "text" ? ["kind","text"]:["kind","files"])
+        guard ["text","files","image"].contains(kind) else {throw WireError.invalid}
+        try checkKeys(decoder,kind == "text" ? ["kind","text","html","rtf"] : kind == "image" ? ["kind","image"] : ["kind","files"])
         files=try c.decodeIfPresent([FileEntry].self,forKey:.files);text=try c.decodeIfPresent(String.self,forKey:.text)
+        html=try c.decodeIfPresent(String.self,forKey:.html);rtf=try c.decodeIfPresent(String.self,forKey:.rtf);image=try c.decodeIfPresent(FileEntry.self,forKey:.image)
     }
 }
 extension Offer {
@@ -284,8 +307,10 @@ func retiredItems(profile: String, adding: [String] = [], acknowledged: UInt64? 
         index.generation += 1
         for id in adding {index.entries[id] = index.generation}
     }
-    guard index.entries.count <= 4096 else {throw WireError.unavailable}
-    try JSONEncoder().encode(index).write(to: url, options: .atomic)
+    guard index.entries.count <= 160016 else {throw WireError.unavailable}
+    let encoded = try JSONEncoder().encode(index)
+    guard encoded.count <= frameLimit else {throw WireError.unavailable}
+    try encoded.write(to: url, options: .atomic)
     guard chmod(url.path, 0o600) == 0 else {throw WireError.unavailable}
     return (index.entries.keys.sorted(), index.generation)
 }

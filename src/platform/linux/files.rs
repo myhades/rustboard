@@ -1,12 +1,12 @@
 use crate::core::{
     Content, FileEntry, LocalFile, ReadAt,
-    engine::{Engine, new_id},
+    engine::Engine,
     transport::{Node, RemoteSource},
 };
 use anyhow::{Result, ensure};
 use fuser::*;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap, HashSet},
     ffi::OsStr,
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
@@ -14,44 +14,62 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
-pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, mount: &Path) -> Result<()> {
-    ensure!(
-        !paths.is_empty() && paths.len() <= 256,
-        "invalid file count"
-    );
-    let mut files = Vec::new();
-    let mut sources: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
-    for path in paths {
-        let path = std::fs::canonicalize(path)?;
-        ensure!(!path.starts_with(mount), "cannot recapture remote files");
+struct FilePath {
+    path: PathBuf,
+    identity: (u64, u64),
+    version: String,
+    size: u64,
+}
+impl ReadAt for FilePath {
+    fn len(&self) -> u64 {
+        self.size
+    }
+    fn open_reader(&self) -> Result<Option<Arc<dyn ReadAt>>> {
+        use std::os::unix::fs::MetadataExt;
         let file = std::fs::OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(&path)?;
-        let source = Arc::new(LocalFile::from_file(file)?);
-        let name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| anyhow::anyhow!("invalid filename"))?
-            .to_string();
-        let id = new_id();
-        files.push(FileEntry {
-            file_id: id.clone(),
-            relative_path: name,
-            size: Some(source.len()),
-            version: source.version(),
-            media_type: "application/octet-stream".into(),
-        });
-        sources.insert(id, source);
+            .open(&self.path)?;
+        let metadata = file.metadata()?;
+        ensure!(
+            (metadata.dev(), metadata.ino()) == self.identity,
+            "version_changed"
+        );
+        let source = LocalFile::from_file(file)?;
+        ensure!(source.version() == self.version, "version_changed");
+        Ok(Some(Arc::new(source)))
+    }
+    fn read_at(&self, offset: u64, buffer: &mut [u8]) -> Result<usize> {
+        self.open_reader()?.unwrap().read_at(offset, buffer)
+    }
+}
+pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, mount: &Path) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let mut files = Vec::new();
+    let mut sources: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
+    for (path, entry) in crate::core::files::manifest(paths)? {
+        let path = std::fs::canonicalize(path)?;
+        ensure!(!path.starts_with(mount), "cannot recapture remote files");
+        if !entry.directory {
+            let metadata = std::fs::metadata(&path)?;
+            sources.insert(
+                entry.file_id.clone(),
+                Arc::new(FilePath {
+                    path,
+                    identity: (metadata.dev(), metadata.ino()),
+                    version: entry.version.clone(),
+                    size: entry.size.unwrap(),
+                }),
+            );
+        }
+        files.push(entry);
     }
     engine.local(Content::Files { files }, sources)?;
     Ok(())
 }
 
 struct Entry {
-    ino: u64,
     parent: u64,
-    name: String,
     batch: String,
     file: Option<FileEntry>,
 }
@@ -61,7 +79,10 @@ struct OpenFile {
 }
 pub struct Files {
     node: Arc<Node>,
-    entries: HashMap<String, Entry>,
+    entries: HashMap<u64, Entry>,
+    children: HashMap<u64, BTreeMap<String, u64>>,
+    batches: HashSet<String>,
+    directories: HashMap<u64, (String, Arc<crate::core::transport::BatchRead>)>,
     handles: HashMap<u64, OpenFile>,
     next: u64,
 }
@@ -70,64 +91,99 @@ impl Files {
         Self {
             node,
             entries: HashMap::new(),
+            children: HashMap::new(),
+            batches: HashSet::new(),
+            directories: HashMap::new(),
             handles: HashMap::new(),
             next: 2,
         }
     }
     fn sync(&mut self) {
-        let offers = self.node.engine.lock().unwrap().retained_offers();
-        self.entries
-            .retain(|_, e| offers.iter().any(|o| o.offer_id == e.batch));
-        for offer in offers {
+        let live: HashSet<_> = self
+            .node
+            .engine
+            .lock()
+            .unwrap()
+            .retained_ids()
+            .into_iter()
+            .collect();
+        if live == self.batches {
+            return;
+        }
+        self.entries.retain(|_, e| live.contains(&e.batch));
+        self.children
+            .retain(|parent, _| *parent == 1 || self.entries.contains_key(parent));
+        for children in self.children.values_mut() {
+            children.retain(|_, ino| self.entries.contains_key(ino));
+        }
+        let added: Vec<_> = live.difference(&self.batches).cloned().collect();
+        for id in added {
+            let Ok(offer) = self.node.engine.lock().unwrap().file_offer(&id) else {
+                continue;
+            };
             if offer.source_device == self.node.identity.device() {
                 continue;
             }
-            let Content::Files { files } = offer.content else {
+            let Content::Files { mut files } = offer.content else {
                 continue;
             };
+            let root = self.insert(1, id.clone(), id.clone(), None);
+            let mut paths = HashMap::from([(String::new(), root)]);
+            files.sort_by_key(|f| f.relative_path.matches('/').count());
             for file in files {
-                let path = format!("{}/{}", offer.offer_id, file.relative_path);
-                let parts: Vec<_> = path.split('/').collect();
-                let mut parent = 1;
-                for index in 0..parts.len() {
-                    let key = parts[..=index].join("/");
-                    let entry = self.entries.entry(key).or_insert_with(|| {
-                        let ino = self.next;
-                        self.next += 1;
-                        Entry {
-                            ino,
-                            parent,
-                            name: parts[index].into(),
-                            batch: offer.offer_id.clone(),
-                            file: if index + 1 == parts.len() {
-                                Some(file.clone())
-                            } else {
-                                None
-                            },
-                        }
-                    });
-                    parent = entry.ino;
-                }
+                let (parent, name) = file
+                    .relative_path
+                    .rsplit_once('/')
+                    .unwrap_or(("", &file.relative_path));
+                let Some(&parent) = paths.get(parent) else {
+                    continue;
+                };
+                let path = file.relative_path.clone();
+                let ino = self.insert(parent, name.into(), id.clone(), Some(file));
+                paths.insert(path, ino);
             }
         }
+        self.batches = live;
+    }
+    fn insert(&mut self, parent: u64, name: String, batch: String, file: Option<FileEntry>) -> u64 {
+        let ino = self.next;
+        self.next += 1;
+        self.children
+            .entry(parent)
+            .or_default()
+            .insert(name.clone(), ino);
+        self.entries.insert(
+            ino,
+            Entry {
+                parent,
+                batch,
+                file,
+            },
+        );
+        ino
     }
     fn attr(&self, ino: u64) -> Option<FileAttr> {
         let size = if ino == 1 {
             None
         } else {
             self.entries
-                .values()
-                .find(|e| e.ino == ino)?
+                .get(&ino)?
                 .file
                 .as_ref()
+                .filter(|f| !f.directory)
                 .map(|f| f.size.unwrap_or(0))
         };
+        let metadata = self.entries.get(&ino).and_then(|e| e.file.as_ref());
+        let modified = metadata
+            .and_then(|f| f.modified_ms)
+            .map(|ms| UNIX_EPOCH + Duration::from_millis(ms))
+            .unwrap_or(UNIX_EPOCH);
         Some(FileAttr {
             ino,
             size: size.unwrap_or(0),
             blocks: 0,
             atime: UNIX_EPOCH,
-            mtime: UNIX_EPOCH,
+            mtime: modified,
             ctime: UNIX_EPOCH,
             crtime: UNIX_EPOCH,
             kind: if size.is_some() {
@@ -135,7 +191,11 @@ impl Files {
             } else {
                 FileType::Directory
             },
-            perm: if size.is_some() { 0o400 } else { 0o500 },
+            perm: if size.is_none() || metadata.is_some_and(|f| f.executable == Some(true)) {
+                0o700
+            } else {
+                0o600
+            },
             nlink: 1,
             uid: unsafe { libc::getuid() },
             gid: unsafe { libc::getgid() },
@@ -148,12 +208,11 @@ impl Files {
 impl Filesystem for Files {
     fn lookup(&mut self, _: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
         self.sync();
-        if let Some(e) = self
-            .entries
-            .values()
-            .find(|e| e.parent == parent && OsStr::new(&e.name) == name)
+        if let Some(ino) = name
+            .to_str()
+            .and_then(|n| self.children.get(&parent)?.get(n))
         {
-            reply.entry(&Duration::ZERO, &self.attr(e.ino).unwrap(), 0);
+            reply.entry(&Duration::ZERO, &self.attr(*ino).unwrap(), 0);
         } else {
             reply.error(libc::ENOENT);
         }
@@ -166,6 +225,50 @@ impl Filesystem for Files {
             reply.error(libc::ENOENT);
         }
     }
+    fn opendir(&mut self, _: &Request<'_>, ino: u64, _: i32, reply: ReplyOpen) {
+        self.sync();
+        if ino == 1 {
+            reply.opened(0, 0);
+            return;
+        }
+        let result = (|| -> Result<_> {
+            ensure!(self.directories.len() < 128, "directory capacity reached");
+            let entry = self
+                .entries
+                .get(&ino)
+                .ok_or_else(|| anyhow::anyhow!("directory expired"))?;
+            ensure!(
+                entry.file.as_ref().is_none_or(|f| f.directory),
+                "not a directory"
+            );
+            let batch = self
+                .directories
+                .values()
+                .find(|(id, _)| id == &entry.batch)
+                .map(|(_, batch)| batch.clone());
+            Ok((
+                entry.batch.clone(),
+                match batch {
+                    Some(batch) => batch,
+                    None => Arc::new(self.node.begin_batch(&entry.batch)?),
+                },
+            ))
+        })();
+        match result {
+            Ok(batch) => {
+                let handle = self.next;
+                self.next += 1;
+                self.directories.insert(handle, batch);
+                reply.opened(handle, 0);
+            }
+            Err(_) => reply.error(libc::EIO),
+        }
+    }
+    fn releasedir(&mut self, _: &Request<'_>, _: u64, handle: u64, _: i32, reply: ReplyEmpty) {
+        self.directories.remove(&handle);
+        self.sync();
+        reply.ok();
+    }
     fn readdir(
         &mut self,
         _: &Request<'_>,
@@ -177,21 +280,26 @@ impl Filesystem for Files {
         self.sync();
         let mut entries = vec![
             (ino, FileType::Directory, ".".to_owned()),
-            (1, FileType::Directory, "..".to_owned()),
-        ];
-        let mut children: Vec<_> = self.entries.values().filter(|e| e.parent == ino).collect();
-        children.sort_by_key(|e| &e.name);
-        entries.extend(children.into_iter().map(|e| {
             (
-                e.ino,
-                if e.file.is_some() {
-                    FileType::RegularFile
-                } else {
-                    FileType::Directory
-                },
-                e.name.clone(),
-            )
-        }));
+                self.entries.get(&ino).map_or(1, |e| e.parent),
+                FileType::Directory,
+                "..".to_owned(),
+            ),
+        ];
+        if let Some(children) = self.children.get(&ino) {
+            entries.extend(children.iter().map(|(name, ino)| {
+                let e = &self.entries[ino];
+                (
+                    *ino,
+                    if e.file.as_ref().is_some_and(|f| !f.directory) {
+                        FileType::RegularFile
+                    } else {
+                        FileType::Directory
+                    },
+                    name.clone(),
+                )
+            }));
+        }
         for (i, (id, kind, name)) in entries.into_iter().enumerate().skip(offset.max(0) as usize) {
             if reply.add(id, (i + 1) as i64, kind, name) {
                 break;
@@ -209,16 +317,19 @@ impl Filesystem for Files {
             ensure!(self.handles.len() < 8, "read capacity reached");
             let e = self
                 .entries
-                .values()
-                .find(|e| e.ino == ino)
+                .get(&ino)
                 .ok_or_else(|| anyhow::anyhow!("file expired"))?;
             let file = e
                 .file
                 .clone()
                 .ok_or_else(|| anyhow::anyhow!("not a file"))?;
-            let (offer, token) = {
+            ensure!(!file.directory, "not a file");
+            let (device, token) = {
                 let mut engine = self.node.engine.lock().unwrap();
-                (engine.file_offer(&e.batch)?, engine.retain_batch(&e.batch)?)
+                (
+                    engine.batch_device(&e.batch)?,
+                    engine.retain_batch(&e.batch)?,
+                )
             };
             let peer = self
                 .node
@@ -226,11 +337,11 @@ impl Filesystem for Files {
                 .lock()
                 .unwrap()
                 .iter()
-                .find(|p| p.device() == offer.source_device)
+                .find(|p| p.device() == device)
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("peer unavailable"))?;
             Ok(OpenFile {
-                source: RemoteSource::new(self.node.clone(), peer, offer, file),
+                source: RemoteSource::new(self.node.clone(), peer, e.batch.clone(), file),
                 _batch: token,
             })
         })();

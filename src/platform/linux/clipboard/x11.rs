@@ -24,6 +24,7 @@ x11rb::atom_manager! {
         URI: b"text/uri-list", COPIED: b"x-special/gnome-copied-files",
         TEXT: b"text/plain;charset=utf-8", PLAIN: b"text/plain",
         PNG: b"image/png", JPEG: b"image/jpeg",
+        HTML: b"text/html", RTF: b"text/rtf", APP_RTF: b"application/rtf",
     }
 }
 struct Pending {
@@ -45,6 +46,8 @@ pub struct Clipboard {
     window: Window,
     atoms: Atoms,
     pending: Option<Pending>,
+    remaining: Vec<Atom>,
+    captured: Option<Captured>,
     formats: Vec<(Atom, Arc<Vec<u8>>)>,
     sends: HashMap<(Window, Atom), Sending>,
 }
@@ -83,6 +86,8 @@ impl Clipboard {
             window,
             atoms,
             pending: None,
+            remaining: Vec::new(),
+            captured: None,
             formats: vec![],
             sends: HashMap::new(),
         })
@@ -111,6 +116,10 @@ impl Clipboard {
             "image/png"
         } else if target == self.atoms.JPEG {
             "image/jpeg"
+        } else if target == self.atoms.HTML {
+            "text/html"
+        } else if target == self.atoms.RTF || target == self.atoms.APP_RTF {
+            "text/rtf"
         } else if target == self.atoms.URI {
             "text/uri-list"
         } else if target == self.atoms.COPIED {
@@ -120,6 +129,27 @@ impl Clipboard {
         };
         super::capture(mime, bytes)
     }
+    fn finish(
+        &mut self,
+        owner: Window,
+        time: Timestamp,
+        target: Atom,
+        bytes: Option<Vec<u8>>,
+    ) -> Result<Option<Captured>> {
+        if let Some(bytes) = bytes
+            && let Ok(value) = self.capture(target, bytes)
+        {
+            super::merge(&mut self.captured, value);
+        }
+        if !self.remaining.is_empty() {
+            let next = self.remaining.remove(0);
+            self.convert(owner, time, next)?;
+            Ok(None)
+        } else {
+            self.pending = None;
+            Ok(self.captured.take().or(Some(Captured::Unsupported)))
+        }
+    }
     fn received(&mut self, event: SelectionNotifyEvent) -> Result<Option<Captured>> {
         let Some(p) = &self.pending else {
             return Ok(None);
@@ -128,8 +158,7 @@ impl Clipboard {
             return Ok(None);
         }
         if event.property == NONE {
-            self.pending = None;
-            return Ok(Some(Captured::Unsupported));
+            return self.finish(p.owner, p.time, p.target, None);
         }
         if self
             .conn
@@ -155,16 +184,30 @@ impl Clipboard {
         ensure!(value.bytes_after == 0, "clipboard data too large");
         if p.target == self.atoms.TARGETS {
             let targets: Vec<_> = value.value32().into_iter().flatten().collect();
-            let preferred = [
-                self.atoms.URI,
-                self.atoms.COPIED,
-                self.atoms.PNG,
-                self.atoms.JPEG,
-                self.atoms.UTF8_STRING,
-                self.atoms.TEXT,
-                self.atoms.PLAIN,
+            let mapping = [
+                (self.atoms.URI, "text/uri-list"),
+                (self.atoms.COPIED, "x-special/gnome-copied-files"),
+                (self.atoms.PNG, "image/png"),
+                (self.atoms.JPEG, "image/jpeg"),
+                (self.atoms.HTML, "text/html"),
+                (self.atoms.RTF, "text/rtf"),
+                (self.atoms.APP_RTF, "application/rtf"),
+                (self.atoms.UTF8_STRING, "UTF8_STRING"),
+                (self.atoms.TEXT, "text/plain;charset=utf-8"),
+                (self.atoms.PLAIN, "text/plain"),
             ];
-            if let Some(target) = preferred.into_iter().find(|a| targets.contains(a)) {
+            let types: Vec<_> = mapping
+                .iter()
+                .filter(|(a, _)| targets.contains(a))
+                .map(|(_, m)| *m)
+                .collect();
+            self.remaining = super::capture_types(&types)
+                .into_iter()
+                .map(|m| mapping.iter().find(|(_, mime)| *mime == m).unwrap().0)
+                .collect();
+            self.captured = None;
+            if !self.remaining.is_empty() {
+                let target = self.remaining.remove(0);
                 self.convert(p.owner, p.time, target)?;
             } else {
                 self.pending = None;
@@ -173,9 +216,7 @@ impl Clipboard {
         } else if value.type_ == self.atoms.INCR {
             self.pending.as_mut().unwrap().incremental = true;
         } else {
-            let target = p.target;
-            self.pending = None;
-            return Ok(Some(self.capture(target, value.value)?));
+            return self.finish(p.owner, p.time, p.target, Some(value.value));
         }
         Ok(None)
     }
@@ -273,6 +314,8 @@ impl Clipboard {
                     {
                         self.formats.clear();
                         self.pending = None;
+                        self.remaining.clear();
+                        self.captured = None;
                         captured = None;
                         if e.owner != NONE {
                             self.convert(e.owner, e.timestamp, self.atoms.TARGETS)?;
@@ -321,7 +364,7 @@ impl Clipboard {
                             .owner
                             == p.owner
                         {
-                            captured = Some(self.capture(p.target, p.bytes)?);
+                            captured = self.finish(p.owner, p.time, p.target, Some(p.bytes))?;
                         }
                     } else {
                         p.bytes.extend(value.value);
@@ -352,13 +395,16 @@ impl Clipboard {
         self.conn.flush()?;
         Ok(captured)
     }
-    pub fn publish_text(&mut self, text: &str) -> Result<()> {
-        let bytes = Arc::new(text.as_bytes().to_vec());
-        self.formats = vec![
-            (self.atoms.UTF8_STRING, bytes.clone()),
-            (self.atoms.TEXT, bytes.clone()),
-            (self.atoms.PLAIN, bytes),
-        ];
+    pub fn publish_formats(&mut self, formats: HashMap<String, Arc<Vec<u8>>>) -> Result<()> {
+        self.formats = formats
+            .into_iter()
+            .map(|(mime, bytes)| {
+                Ok((
+                    self.conn.intern_atom(false, mime.as_bytes())?.reply()?.atom,
+                    bytes,
+                ))
+            })
+            .collect::<Result<_>>()?;
         self.claim()
     }
     pub fn publish_files(&mut self, paths: &[PathBuf]) -> Result<()> {
@@ -377,6 +423,8 @@ impl Clipboard {
     }
     fn claim(&mut self) -> Result<()> {
         self.pending = None;
+        self.remaining.clear();
+        self.captured = None;
         self.conn
             .set_selection_owner(self.window, self.atoms.CLIPBOARD, CURRENT_TIME)?
             .check()?;

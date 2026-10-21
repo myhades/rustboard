@@ -47,7 +47,12 @@ impl Receiving {
                 }
                 Ok(n) => {
                     ensure!(
-                        self.bytes.len() + n <= crate::app::image_file::MAX_IMAGE_BYTES,
+                        self.bytes.len() + n
+                            <= if self.mime.starts_with("image/") {
+                                crate::app::image_file::MAX_IMAGE_BYTES
+                            } else {
+                                crate::core::MAX_TEXT
+                            },
                         "clipboard data too large"
                     );
                     self.bytes.extend_from_slice(&buffer[..n]);

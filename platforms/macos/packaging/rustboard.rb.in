@@ -15,8 +15,8 @@ cask "rustboard" do
     sudo: false,
   }
   binary "#{Dir.home}/Library/Application Support/Rustboard/bin/rustboard"
-  postflight do
-    FileUtils.rm_f "#{staged_path}/bin/rustboard"
+  postflight_steps do
+    remove "bin/rustboard"
   end
   uninstall script: {
     executable: "/bin/bash",

@@ -16,7 +16,7 @@ archive = out / f"rustboard-{version}-linux-x86_64.tar.gz"
 with tarfile.open(archive, "w:gz") as tar:
     for name in ["rustboard", "rustboardd"]:
         tar.add(root / "target/release" / name, arcname="bin/" + name)
-    for name in ["install.sh", "uninstall.sh"]:
+    for name in ["install.sh", "uninstall.sh", "purge.sh"]:
         tar.add(root / "platforms/linux/scripts" / name, arcname="platforms/linux/scripts/" + name)
     tar.add(root / "LICENSE", arcname="LICENSE")
     tar.add(root / "README.md", arcname="README.md")

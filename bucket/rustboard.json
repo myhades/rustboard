@@ -15,10 +15,6 @@
     "script": "& \"$dir\\platforms\\windows\\scripts\\install.ps1\" -Source \"$dir\\bin\" -NoPath"
   },
   "uninstaller": {
-    "script": "if ($cmd -eq \"uninstall\") { & \"$dir\\platforms\\windows\\scripts\\uninstall.ps1\" }"
-  },
-  "notes": [
-    "Configure with rustboard config/pair, then reload.",
-    "Uninstall retains identity and pairing. Scoop manages the CLI shim."
-  ]
+    "script": "if ($cmd -eq \"uninstall\") { & \"$dir\\platforms\\windows\\scripts\\uninstall.ps1\" -Purge:$purge }"
+  }
 }

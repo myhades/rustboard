@@ -87,6 +87,18 @@ try:
     assert not link.is_symlink() and not installed.exists()
     assert config.read_bytes() == original
     report["uninstall_removes_cli_preserves_config"] = True
+    # Isolate the credential hook as well as HOME from the live desktop keyring.
+    secret_tool = work / "secret-tool"
+    secret_tool.write_text('#!/bin/sh\n[ "$*" = "clear xdg:schema org.rustboard.Identity" ] || exit 2\ntouch "' + str(work / "credential-cleared") + '"\n')
+    secret_tool.chmod(0o755)
+    template = template.replace('#{HOMEBREW_PREFIX}/bin/secret-tool', str(secret_tool))
+    write_cask(2)
+    run("install", "--cask", name)
+    assert config.read_bytes() == original
+    run("uninstall", "--zap", "--cask", name)
+    assert not config.parent.parent.exists() and not link.is_symlink()
+    assert (work / "credential-cleared").exists()
+    report["zap_removes_state_and_calls_credential_cleanup"] = True
 finally:
     if (prefix / "Caskroom" / token).exists():
         subprocess.run([str(brew), "uninstall", "--cask", name], env=env)

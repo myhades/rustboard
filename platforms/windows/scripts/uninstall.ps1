@@ -1,3 +1,4 @@
+param([switch]$Purge)
 $ErrorActionPreference='Stop'
 $base=Join-Path $env:LOCALAPPDATA 'Rustboard'
 $bin=[IO.Path]::GetFullPath((Join-Path $base 'bin'))
@@ -20,4 +21,10 @@ try {
     }
 } finally {$env:RUSTBOARD_PROFILE=$previousProfile}
 & (Join-Path $PSScriptRoot 'path.ps1') -Action Remove
-Write-Output 'Login startup and binaries removed. Identity, pairing, configuration and logs retained.'
+if ($Purge -and (Test-Path -LiteralPath $base)) {
+    $target=[IO.Path]::GetFullPath($base)
+    $expected=[IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Rustboard'))
+    if ($target -ne $expected -or ((Get-Item -LiteralPath $target).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unexpected data directory' }
+    Remove-Item -LiteralPath $target -Recurse -Force
+}
+Write-Output 'Uninstalled.'

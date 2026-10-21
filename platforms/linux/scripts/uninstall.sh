@@ -15,4 +15,4 @@ if [ "$(readlink "$HOME/.local/bin/rustboard" || true)" = "$base/rustboard" ]; t
 fi
 rm -f "$base/rustboard" "$base/rustboardd"
 rmdir "$base" 2>/dev/null || true
-printf 'Uninstalled. Configuration and keyring identity retained.\n'
+printf 'Uninstalled.\n'

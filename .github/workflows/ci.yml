@@ -27,5 +27,9 @@ jobs:
       - run: cargo test --all-targets --locked
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: python scripts/check-vectors.py
+      - if: runner.os != 'Windows'
+        run: python scripts/test-purge.py
+      - if: runner.os == 'Windows'
+        run: ./platforms/windows/scripts/test-uninstall.ps1
       - if: runner.os == 'macOS'
         run: bash platforms/macos/scripts/test.sh

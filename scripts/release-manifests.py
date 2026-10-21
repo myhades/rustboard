@@ -64,8 +64,8 @@ scoop = dict(
     bin="bin/rustboard.exe",
     pre_install="if ($global) { throw 'Rustboard must be installed per user, without --global' }",
     installer=dict(script='& "$dir\\platforms\\windows\\scripts\\install.ps1" -Source "$dir\\bin" -NoPath'),
-    uninstaller=dict(script='if ($cmd -eq "uninstall") { & "$dir\\platforms\\windows\\scripts\\uninstall.ps1" }'),
-    notes=["Run rustboard start to initialize and enable the service; then configure/pair.", "Uninstall retains identity and pairing. Scoop manages the CLI shim."])
+    uninstaller=dict(script='if ($cmd -eq "uninstall") { & "$dir\\platforms\\windows\\scripts\\uninstall.ps1" -Purge:$purge }'),
+)
 bucket = a.output / "bucket"
 bucket.mkdir(parents=True, exist_ok=True)
 (bucket / "rustboard.json").write_text(json.dumps(scoop, indent=2) + "\n")

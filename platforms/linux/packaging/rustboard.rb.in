@@ -20,11 +20,9 @@ cask "rustboard" do
     args: ["#{staged_path}/platforms/linux/scripts/uninstall.sh"],
     sudo: false,
   }
-  caveats <<~EOS
-    Requires x86_64 Linux with glibc 2.39+, systemd, FUSE 3, libsecret and libdbus.
-    Run in a desktop session with an unlocked Secret Service keyring.
-    Initialize and enable the service: rustboard start
-    Stop Rustboard before upgrading; run rustboard start when ready afterwards.
-    Uninstall retains identity, peers and configuration.
-  EOS
+  zap script: {
+    executable: "/bin/sh",
+    args: ["#{staged_path}/platforms/linux/scripts/purge.sh", "#{HOMEBREW_PREFIX}/bin/secret-tool"],
+    sudo: false,
+  }
 end

@@ -20,13 +20,9 @@ cask "rustboard" do
     args: ["#{staged_path}/platforms/macos/scripts/uninstall.sh"],
     sudo: false,
   }
-  caveats <<~EOS
-    Development-signed and NOT notarized. Other-Mac File Provider acceptance is pending.
-    macOS may require manual Open Anyway approval.
-    Configure listen and pairing after installation: rustboard config
-    Apply saved changes: rustboard reload
-    Allow Local Network access when prompted; manage permissions in System Settings > Privacy & Security.
-    Full Disk Access is only needed for protected source locations.
-    Uninstall retains identity, peers and configuration.
-  EOS
+  zap script: {
+    executable: "/bin/bash",
+    args: ["#{staged_path}/platforms/macos/scripts/purge.sh"],
+    sudo: false,
+  }
 end

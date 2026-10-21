@@ -52,6 +52,12 @@ try {
     if (Test-Path $cli) {throw 'Uninstall left CLI shim'}
     if (Test-Path (Join-Path $env:LOCALAPPDATA 'Rustboard/bin/rustboard.exe')) {throw 'Uninstall left installed binary'}
     if (!(Test-Path $config)) {throw 'Uninstall deleted user config'}
+    & $scoop install rustboard/rustboard
+    $after=(Get-Content $config -Raw | ConvertFrom-Json).identity | ConvertTo-Json -Depth 16 -Compress
+    if ($after -cne $identity) {throw 'Reinstall changed device identity'}
+    & $scoop uninstall --purge rustboard
+    if (Test-Path (Join-Path $env:LOCALAPPDATA 'Rustboard')) {throw 'Purge left user data'}
+    if (Test-Path $cli) {throw 'Purge left CLI shim'}
 } finally {
     Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
 }

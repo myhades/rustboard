@@ -14,7 +14,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--brew", default="brew")
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[3]
-brew = Path(shutil.which(args.brew) or args.brew).resolve()
+# Preserve the launcher symlink: Homebrew derives its prefix from this path.
+brew = Path(shutil.which(args.brew) or args.brew).absolute()
 version = tomllib.loads((root / "Cargo.toml").read_text())["package"]["version"]
 archive = root / f"target/release-assets/rustboard-{version}-linux-x86_64.tar.gz"
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -44,7 +45,8 @@ def write_cask(revision):
 
 prefix = Path(run("--prefix", capture_output=True).stdout.strip())
 assert not (prefix / "Caskroom" / token).exists(), "Test Cask already exists"
-tap_path = prefix / "Library/Taps/rustboard-test/homebrew-local"
+repository = Path(run("--repository", capture_output=True).stdout.strip())
+tap_path = repository / "Library/Taps/rustboard-test/homebrew-local"
 assert not tap_path.exists(), "Test tap already exists"
 (tap_path / "Casks").mkdir(parents=True)
 subprocess.run(["git", "init", "-q", str(tap_path)], check=True)

@@ -15,7 +15,10 @@ cask "rustboard" do
       args: ["#{staged_path}/platforms/macos/scripts/install.sh", "--no-path"],
       sudo: false,
     }
-    binary "#{staged_path}/bin/rustboard"
+    binary "#{Dir.home}/Library/Application Support/Rustboard/bin/rustboard"
+    postflight do
+      FileUtils.rm_f "#{staged_path}/bin/rustboard"
+    end
     uninstall script: {
       executable: "/bin/bash",
       args: ["#{staged_path}/platforms/macos/scripts/uninstall.sh"],

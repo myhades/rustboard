@@ -92,7 +92,7 @@ Open the config file with `rustboard config`, then run `rustboard restart` to ap
 | Setting | Default | Description |
 | --- | --- | --- |
 | `listen` | `0.0.0.0:45452` | The local listening address. Use a specific IP to restrict the interface, or `null` to disable incoming connections. |
-| `mode` | `all` | `all` synchronizes text and files, including copied images as files. `text` synchronizes plain text only. |
+| `mode` | `all` | `all` synchronizes text, images, files and folders. `text` synchronizes plain text only. |
 
 #### macOS
 

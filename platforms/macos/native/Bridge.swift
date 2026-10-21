@@ -1,4 +1,5 @@
 import AppKit
+import IOKit.pwr_mgt
 
 private var observed = -1
 private var owned = -1
@@ -82,4 +83,16 @@ private var owned = -1
         } catch {return -1}
     }
     return -1
+}
+
+
+// Match caffeinate -u -t 5 without launching a subprocess.
+@_cdecl("rb_wake_on_receive") public func rbWakeOnReceive() -> Int32 {
+    var assertion: IOPMAssertionID = 0
+    return IOPMAssertionCreateWithDescription(
+        "UserIsActive" as CFString,
+        "Rustboard received clipboard content" as CFString,
+        nil, nil, nil, 5,
+        kIOPMAssertionTimeoutActionRelease as CFString,
+        &assertion)
 }

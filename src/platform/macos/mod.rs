@@ -12,6 +12,7 @@ use std::{
 };
 unsafe extern "C" {
     fn rb_init();
+    fn rb_wake_on_receive() -> i32;
     fn rb_change_count() -> i64;
     fn rb_adopt_files(sequence: i64, count: i64) -> i32;
     fn rb_clear_owned();
@@ -166,7 +167,9 @@ pub fn run() -> Result<()> {
         }
     }
     let (identity, peers) = crate::app::config::startup(&dir)?;
-    let eager_download = crate::app::config::load(&dir)?["advanced"]["macos_eager_download"]
+    let config = crate::app::config::load(&dir)?;
+    let eager_download = config["macos"]["eager_download"].as_bool().unwrap_or(false);
+    let wake_on_receive = config["macos"]["wake_on_receive"]
         .as_bool()
         .unwrap_or(false);
     let node = Node::new(identity, peers);
@@ -305,6 +308,7 @@ pub fn run() -> Result<()> {
                 Content::Files { .. } => {
                     if backend.publish_files(&offer).is_err() {
                         log::warn!(target: "clipboard", "file publication failed");
+                        continue;
                     } else {
                         presented = Some(offer.offer_id.clone());
                         log::debug!(target: "clipboard", "native file publication complete");
@@ -331,6 +335,9 @@ pub fn run() -> Result<()> {
                         }
                     }
                 }
+            }
+            if wake_on_receive && unsafe { rb_wake_on_receive() } != 0 {
+                log::warn!(target: "clipboard", "user activity declaration failed");
             }
         }
     }

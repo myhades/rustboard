@@ -38,7 +38,7 @@ pub fn load(dir: &Path) -> Result<Value> {
     let value = if path.exists() {
         read_json(&path)?
     } else {
-        json!({"listen":"0.0.0.0:45452","mode":"all","advanced":{"macos_eager_download":false},"peers":[],"identity":null})
+        json!({"listen":"0.0.0.0:45452","mode":"all","peers":[],"identity":null})
     };
     validate(&value)?;
     Ok(value)
@@ -50,7 +50,7 @@ fn validate(value: &Value) -> Result<()> {
     ensure!(
         object
             .keys()
-            .all(|k| ["listen", "mode", "peers", "identity", "advanced"].contains(&k.as_str())),
+            .all(|k| ["listen", "mode", "peers", "identity", "macos"].contains(&k.as_str())),
         "unknown config key"
     );
     ensure!(
@@ -72,19 +72,20 @@ fn validate(value: &Value) -> Result<()> {
             || (value["identity"].is_null() && value["peers"].as_array().unwrap().is_empty()),
         "invalid identity"
     );
-    if let Some(advanced) = object.get("advanced") {
-        let advanced = advanced
+    if let Some(macos) = object.get("macos") {
+        let macos = macos
             .as_object()
-            .ok_or_else(|| anyhow::anyhow!("advanced must be an object"))?;
+            .ok_or_else(|| anyhow::anyhow!("macos must be an object"))?;
         ensure!(
-            advanced.keys().all(|key| key == "macos_eager_download"),
-            "unknown advanced config key"
+            macos
+                .keys()
+                .all(|key| ["eager_download", "wake_on_receive"].contains(&key.as_str())),
+            "unknown macos config key"
         );
-        if let Some(enabled) = advanced.get("macos_eager_download") {
-            ensure!(
-                enabled.is_boolean(),
-                "advanced.macos_eager_download must be boolean"
-            );
+        for key in ["eager_download", "wake_on_receive"] {
+            if let Some(enabled) = macos.get(key) {
+                ensure!(enabled.is_boolean(), "macos.{key} must be boolean");
+            }
         }
     }
     peers(value)?;
@@ -110,18 +111,18 @@ fn serialize(value: &Value) -> Result<Vec<u8>> {
         listen: &'a Value,
         mode: &'a Value,
         #[serde(skip_serializing_if = "Option::is_none")]
-        advanced: Option<&'a Value>,
+        macos: Option<&'a Value>,
         peers: &'a Value,
         identity: &'a Value,
     }
     let mut text = serde_json::to_string_pretty(&Fields {
         listen: &value["listen"],
         mode: &value["mode"],
-        advanced: value.get("advanced"),
+        macos: value.get("macos"),
         peers: &value["peers"],
         identity: &value["identity"],
     })?;
-    for key in ["advanced", "peers", "identity"] {
+    for key in ["macos", "peers", "identity"] {
         text = text.replace(&format!(",\n  \"{key}\":"), &format!(",\n\n  \"{key}\":"));
     }
     text.push('\n');
@@ -303,16 +304,23 @@ mod validation_tests {
     #[test]
     fn config_output_keeps_settings_before_peers_and_identity() {
         let dir = std::env::temp_dir().join(crate::core::engine::new_id());
-        let value = load(&dir).unwrap();
+        let mut value = load(&dir).unwrap();
+        assert!(value.get("macos").is_none());
+        assert!(
+            !String::from_utf8(serialize(&value).unwrap())
+                .unwrap()
+                .contains("\"macos\"")
+        );
+        value["macos"] = json!({"eager_download":true,"wake_on_receive":true});
         let bytes = serialize(&value).unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), value);
         let text = String::from_utf8(bytes).unwrap();
-        let positions: Vec<_> = ["listen", "mode", "advanced", "peers", "identity"]
+        let positions: Vec<_> = ["listen", "mode", "macos", "peers", "identity"]
             .iter()
             .map(|key| text.find(&format!("\"{key}\"")).unwrap())
             .collect();
         assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-        assert!(text.contains(",\n\n  \"advanced\": {"));
+        assert!(text.contains(",\n\n  \"macos\": {"));
         assert!(text.ends_with('\n'));
     }
     #[test]
@@ -343,23 +351,25 @@ mod validation_tests {
     fn malformed_settings_and_duplicate_peers_are_rejected() {
         let mut value = json!({"listen":"127.0.0.1:45451","mode":"all","peers":[],"identity":{}});
         validate(&value).unwrap();
-        value["advanced"] = json!({"macos_eager_download":true});
+        value["macos"] = json!({"eager_download":true});
         validate(&value).unwrap();
-        value["advanced"]["macos_eager_download"] = "true".into();
+        value["macos"]["eager_download"] = "true".into();
         assert!(validate(&value).is_err());
-        value["advanced"]["macos_eager_download"] = false.into();
+        value["macos"]["eager_download"] = false.into();
         validate(&value).unwrap();
-        value["advanced"]["unknown"] = true.into();
+        value["macos"]["wake_on_receive"] = true.into();
+        validate(&value).unwrap();
+        value["macos"]["wake_on_receive"] = "true".into();
         assert!(validate(&value).is_err());
-        value["advanced"] = Value::Null;
+        value["macos"]["wake_on_receive"] = false.into();
+        value["macos"]["unknown"] = true.into();
         assert!(validate(&value).is_err());
-        value["advanced"] = json!({});
-        value["macos_eager_download"] = true.into();
+        value["macos"] = Value::Null;
         assert!(validate(&value).is_err());
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("macos_eager_download");
+        value["macos"] = json!({});
+        value["eager_download"] = true.into();
+        assert!(validate(&value).is_err());
+        value.as_object_mut().unwrap().remove("eager_download");
         value["listen"] = "not-an-address".into();
         assert!(validate(&value).is_err());
         value["listen"] = Value::Null;

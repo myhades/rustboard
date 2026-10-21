@@ -42,7 +42,13 @@ fn main() {
         String::from_utf8(sdk.stdout).unwrap().trim()
     );
     println!("cargo:rustc-link-lib=static=RustboardBridge");
-    for framework in ["AppKit", "Foundation", "Security", "LocalAuthentication"] {
+    for framework in [
+        "AppKit",
+        "Foundation",
+        "Security",
+        "LocalAuthentication",
+        "IOKit",
+    ] {
         println!("cargo:rustc-link-lib=framework={framework}");
     }
 }

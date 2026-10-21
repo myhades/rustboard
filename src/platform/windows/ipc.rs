@@ -348,7 +348,7 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn dacl_text(path: &std::path::Path) -> String {
+    fn dacl_text(path: &std::path::Path) -> (String, String) {
         use std::os::windows::ffi::OsStrExt;
         let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
         unsafe {
@@ -365,6 +365,22 @@ mod tests {
             )
             .ok()
             .unwrap();
+            let mut present = windows::core::BOOL::default();
+            let mut defaulted = windows::core::BOOL::default();
+            let mut acl = std::ptr::null_mut();
+            GetSecurityDescriptorDacl(descriptor, &mut present, &mut acl, &mut defaulted).unwrap();
+            assert!(present.as_bool() && !acl.is_null());
+            let mut ace = std::ptr::null_mut();
+            GetAce(acl, 0, &mut ace).unwrap();
+            let ace = &*ace.cast::<ACCESS_ALLOWED_ACE>();
+            let mut sid = PWSTR::null();
+            ConvertSidToStringSidW(
+                PSID(std::ptr::addr_of!(ace.SidStart).cast_mut().cast()),
+                &mut sid,
+            )
+            .unwrap();
+            let sid_value = sid.to_string().unwrap();
+            let _ = LocalFree(Some(HLOCAL(sid.0.cast())));
             let mut text = PWSTR::null();
             let result = ConvertSecurityDescriptorToStringSecurityDescriptorW(
                 descriptor,
@@ -377,7 +393,7 @@ mod tests {
             result.unwrap();
             let value = text.to_string();
             let _ = LocalFree(Some(HLOCAL(text.0.cast())));
-            value.unwrap()
+            (value.unwrap(), sid_value)
         }
     }
     #[test]
@@ -415,23 +431,23 @@ mod tests {
             }
             let _ = LocalFree(Some(HLOCAL(descriptor.0)));
         }
-        assert!(dacl_text(&dir.join("config.json")).contains(";;;WD)"));
+        assert!(dacl_text(&dir.join("config.json")).0.contains(";;;WD)"));
         protect_profile(&dir).unwrap();
         protect_profile(&dir).unwrap();
         for name in ["", "config.json", "config.lock", "clock.json"] {
-            let acl = dacl_text(&dir.join(name));
+            let (acl, trustee) = dacl_text(&dir.join(name));
             assert!(acl.starts_with("D:P"), "{acl}");
             assert_eq!(acl.matches('(').count(), 1, "{acl}");
-            assert!(acl.contains(&format!(";;;{sid})")), "{acl}");
+            assert_eq!(trustee, sid, "{acl}");
             if !name.is_empty() {
                 assert_eq!(std::fs::read(dir.join(name)).unwrap(), b"unchanged");
             }
         }
         let new_file = dir.join("new.tmp");
         std::fs::write(&new_file, b"new").unwrap();
-        let acl = dacl_text(&new_file);
+        let (acl, trustee) = dacl_text(&new_file);
         assert_eq!(acl.matches('(').count(), 1, "{acl}");
-        assert!(acl.contains(&format!(";;;{sid})")), "{acl}");
+        assert_eq!(trustee, sid, "{acl}");
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]

@@ -14,6 +14,7 @@ jobs:
       matrix:
         os: [windows-2022, ubuntu-24.04, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name }}
     steps:
@@ -45,6 +46,9 @@ jobs:
         run: |
           python scripts/release-manifests.py --windows-only --tag $env:RELEASE_TAG --assets target/release-assets --output target/manifests
           ./platforms/windows/scripts/test-scoop.ps1
+      - name: Set up Homebrew
+        if: runner.os == 'Linux'
+        uses: Homebrew/actions/setup-homebrew@0fdc2c96a16d9f945f7e1577784302fd27a549a9
       - if: runner.os == 'Linux'
         run: |
           cargo build --release --locked --bins
@@ -52,8 +56,18 @@ jobs:
           python scripts/release-manifests.py --linux-only --tag "$RELEASE_TAG" --assets target/release-assets --output target/manifests
           brew update
           python platforms/linux/scripts/test-brew.py
-      - if: runner.os == 'macOS'
-        run: bash platforms/macos/scripts/test.sh && bash platforms/macos/scripts/build.sh && bash platforms/macos/scripts/test-install.sh
+      - name: Test macOS bridge
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        run: bash -x platforms/macos/scripts/test.sh
+      - name: Build macOS bundles
+        if: runner.os == 'macOS'
+        timeout-minutes: 15
+        run: bash -x platforms/macos/scripts/build.sh
+      - name: Test macOS installation
+        if: runner.os == 'macOS'
+        timeout-minutes: 3
+        run: bash platforms/macos/scripts/test-install.sh
       - name: Sign without notarization
         if: runner.os == 'macOS'
         env:

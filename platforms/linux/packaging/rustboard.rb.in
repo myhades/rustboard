@@ -7,10 +7,11 @@ cask "rustboard" do
   homepage "https://github.com/myhades/rustboard"
   depends_on :linux
   depends_on arch: :intel
+  depends_on formula: ["libsecret", "glib", "dbus", "patchelf"]
 
   installer script: {
     executable: "/bin/sh",
-    args: ["#{staged_path}/platforms/linux/scripts/install.sh", "#{staged_path}/bin", "--no-path"],
+    args: ["#{staged_path}/platforms/linux/scripts/install.sh", "#{staged_path}/bin", "--no-path", "#{HOMEBREW_PREFIX}"],
     sudo: false,
   }
   binary "#{Dir.home}/.local/lib/rustboard/rustboard"

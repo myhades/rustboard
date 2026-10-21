@@ -26,27 +26,31 @@ env = dict(os.environ, HOME=str(home), HOMEBREW_NO_AUTO_UPDATE="1", HOMEBREW_NO_
 env.pop("XDG_CONFIG_HOME", None)
 env.pop("RUSTBOARD_PROFILE", None)
 tap = "rustboard-test/local"
-name = tap + "/rustboard"
+token = "rustboard-install-test"
+name = tap + "/" + token
 
 def run(*argv, **kwargs):
     return subprocess.run([str(brew), *argv], env=env, check=True, text=True, **kwargs)
 
 def write_cask(revision):
-    text = template.replace(f'version "{version}"', f'version "{version}-test.{revision}"')
+    text = template.replace('cask "rustboard"', f'cask "{token}"')
+    text = text.replace(f'version "{version}"', f'version "{version}-test.{revision}"')
+    text = text.replace('binary "#{Dir.home}/.local/lib/rustboard/rustboard"',
+                        'binary "#{Dir.home}/.local/lib/rustboard/rustboard", target: "' + token + '"')
     import re
     text = re.sub(r'url "[^"\n]+"', f'url "{archive.as_uri()}"', text)
     assert digest in text
-    (tap_path / "Casks/rustboard.rb").write_text(text)
+    (tap_path / f"Casks/{token}.rb").write_text(text)
 
 prefix = Path(run("--prefix", capture_output=True).stdout.strip())
-assert not (prefix / "Caskroom/rustboard").exists(), "Use a Brew installation without Rustboard"
+assert not (prefix / "Caskroom" / token).exists(), "Test Cask already exists"
 tap_path = prefix / "Library/Taps/rustboard-test/homebrew-local"
 assert not tap_path.exists(), "Test tap already exists"
 (tap_path / "Casks").mkdir(parents=True)
 subprocess.run(["git", "init", "-q", str(tap_path)], check=True)
 config = home / ".config/rustboard/default/config.json"
 installed = home / ".local/lib/rustboard"
-link = prefix / "bin/rustboard"
+link = prefix / "bin" / token
 report = {}
 try:
     write_cask(1)
@@ -56,6 +60,16 @@ try:
     assert link.resolve() == installed / "rustboard"
     assert not (home / ".local/bin/rustboard").exists()
     assert not (home / ".config").exists(), "Install initialized user state"
+    subprocess.run([str(link), "version"], env=env, check=True)
+    for binary in ["rustboard", "rustboardd"]:
+        clean_env = {k: v for k, v in env.items() if k not in ("LD_LIBRARY_PATH", "LD_PRELOAD")}
+        linkage = subprocess.run(["ldd", str(installed / binary)], env=clean_env,
+                                 check=True, capture_output=True, text=True).stdout
+        assert "not found" not in linkage, linkage
+        for library in (["libsecret-1.so.0", "libglib-2.0.so.0", "libdbus-1.so.3"] if binary == "rustboardd" else []):
+            line = next(line for line in linkage.splitlines() if line.strip().startswith(library + " "))
+            assert str(prefix) in line, line
+    report["brew_runtime_libraries"] = True
     report["fresh_install_no_initialization"] = True
     # Preserve opaque user data; installation must not parse or rewrite it.
     config.parent.mkdir(parents=True)
@@ -74,7 +88,7 @@ try:
     assert config.read_bytes() == original
     report["uninstall_removes_cli_preserves_config"] = True
 finally:
-    if (prefix / "Caskroom/rustboard").exists():
+    if (prefix / "Caskroom" / token).exists():
         subprocess.run([str(brew), "uninstall", "--cask", name], env=env)
     shutil.rmtree(tap_path)
     shutil.rmtree(work)

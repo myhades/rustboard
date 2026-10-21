@@ -6,7 +6,7 @@
   "architecture": {
     "64bit": {
       "url": "https://github.com/myhades/rustboard/releases/download/v0.1.0/rustboard-0.1.0-windows-x64.zip",
-      "hash": "759172aa4b4c82da7dd3e6313348a8392fbb156a349c72c492c08d977ef0a42f"
+      "hash": "b4c506d548d8c38253e4b3da03b8dac67dd6c1973b38048ef91ed4bb42600843"
     }
   },
   "bin": "bin/rustboard.exe",

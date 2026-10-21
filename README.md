@@ -19,8 +19,7 @@ Native clipboard sync for Windows, macOS and Linux.
 
 ## Demo
 
-<!-- Add the demo GIF at assets/demo.gif, then uncomment the image below. -->
-<!-- ![Copy and paste between Windows, macOS and Linux](assets/demo.gif) -->
+https://github.com/user-attachments/assets/817a0642-b6a9-406b-a7d0-f644dc4814a0
 
 ## Installation
 

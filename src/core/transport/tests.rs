@@ -65,6 +65,16 @@ fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
         .unwrap();
     let server = a.serve(listener).unwrap();
     b.sync_once(&peer).unwrap();
+    assert!(
+        a.local_ipc(IpcOperation::GetFileOffers).unwrap()["offers"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        b.local_ipc(IpcOperation::GetFileOffers).unwrap()["offers"][0]["offer_id"],
+        offer.offer_id
+    );
     assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
     let remote = RemoteSource::new(b.clone(), peer, offer.offer_id.clone(), file);
     remote.read_at(0, &mut [0; 4096]).unwrap();
@@ -126,6 +136,13 @@ fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(a.engine.lock().unwrap().retained_offers().is_empty());
+    assert!(
+        b.local_ipc(IpcOperation::GetFileOffer {
+            offer_id: offer.offer_id,
+        })
+        .unwrap()["offer"]
+            .is_null()
+    );
     a.stop.store(true, Ordering::Release);
     server.join().unwrap();
 }

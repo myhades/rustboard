@@ -60,7 +60,7 @@ impl Node {
                 ))
             }
             IpcOperation::GetFileOffer { offer_id } => {
-                let offer = self.engine.lock().unwrap().file_offer(&offer_id)?;
+                let offer = self.engine.lock().unwrap().file_offer(&offer_id).ok();
                 Ok(IpcReply::Other(
                     serde_json::json!({"ok":true,"protocol":1,"offer":offer}),
                 ))
@@ -72,7 +72,10 @@ impl Node {
                     .unwrap()
                     .retained_offers()
                     .into_iter()
-                    .filter(|o| matches!(o.content, Content::Files { .. }))
+                    .filter(|o| {
+                        o.source_device != self.identity.device()
+                            && matches!(o.content, Content::Files { .. })
+                    })
                     .collect();
                 Ok(IpcReply::Other(
                     serde_json::json!({"ok":true,"protocol":1,"offers":offers}),

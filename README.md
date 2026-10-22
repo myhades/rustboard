@@ -48,16 +48,16 @@ Synchronize the clipboard between paired computers.
 Usage: rustboard <COMMAND> [ARGUMENTS]
 
 Commands:
-  status [--json]        Show service state and peers
-  start                  Start the service and enable login startup
-  stop                   Stop the service and disable login startup
-  restart                Restart the service and apply saved configuration
-  config                 Open the configuration in your text editor
-  log                    Open the current log in your text editor
-  pair [<IP>[:<PORT>]]   Wait for pairing or connect to a peer
-  unpair <IP>[:<PORT>]   Remove pairing for an IP address
-  help [<COMMAND>]       Show help for all commands or a specific command
-  version                Show the installed CLI version
+  status [--json]       Show service state and peers
+  start                 Start the service and enable login startup
+  stop                  Stop the service and disable login startup
+  restart               Restart the service and apply saved configuration
+  config                Open the configuration in your text editor
+  log                   Open the current log in your text editor
+  pair [<IP>[:<PORT>]]  Wait for pairing or connect to a peer
+  unpair <IP>[:<PORT>]  Remove pairing for an IP address
+  help [<COMMAND>]      Show help for all commands or a specific command
+  version               Show the installed CLI version
 
 Run 'rustboard help <COMMAND>' for command details.
 ```

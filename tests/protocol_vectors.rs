@@ -31,6 +31,9 @@ fn shared_mac_linux_windows_vectors() {
     write_frame(&mut encoded, &offer).unwrap();
     let decoded: Offer = read_frame(&mut &encoded[..]).unwrap();
     assert_eq!(offer, decoded);
+    for path in vectors["valid_paths"].as_array().unwrap() {
+        validate_path(path.as_str().unwrap()).unwrap();
+    }
     for path in vectors["invalid_paths"].as_array().unwrap() {
         assert!(validate_path(path.as_str().unwrap()).is_err());
     }

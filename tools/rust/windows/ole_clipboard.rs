@@ -16,6 +16,11 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let size = args.first().map(|s| s.parse()).transpose()?.unwrap_or(4096);
     let seconds = args.get(1).map(|s| s.parse()).transpose()?.unwrap_or(30u64);
+    let names: Vec<String> = if args.len() > 2 {
+        args[2..].to_vec()
+    } else {
+        vec![format!("rustboard-{size}.bin")]
+    };
     let source = Arc::new(pattern::PatternSource::new(size));
     unsafe {
         OleInitialize(None)?;
@@ -30,12 +35,15 @@ fn main() -> anyhow::Result<()> {
     }
     let _ole = OleGuard;
     let object = virtual_files::create(
-        vec![PresentedFile {
-            directory: false,
-            modified_ms: None,
-            name: format!("rustboard-{size}.bin"),
-            source: source.clone(),
-        }],
+        names
+            .into_iter()
+            .map(|name| PresentedFile {
+                directory: name.ends_with('/'),
+                modified_ms: None,
+                name: name.trim_end_matches('/').into(),
+                source: source.clone(),
+            })
+            .collect(),
         None,
         false,
     )?;

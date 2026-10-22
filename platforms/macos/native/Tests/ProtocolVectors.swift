@@ -4,11 +4,12 @@ import CryptoKit
 @main struct ProtocolVectors {
     static func main() throws {
         let vector = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
-        struct Vectors: Decodable {let offer: Offer; let data: DataMessage; let invalid_paths: [String]}
+        struct Vectors: Decodable {let offer: Offer; let data: DataMessage; let invalid_paths: [String]; let valid_paths: [String]}
         let v = try JSONDecoder().decode(Vectors.self, from: vector)
         try v.offer.validate(now: 999999)
         precondition(v.offer.content.files![1].relative_path == "folder/样例.bin")
         precondition(v.data.offset == 249 && v.data.bytes == [249,250,0,1,2])
+        precondition(v.valid_paths.allSatisfy {validPath($0)})
         precondition(v.invalid_paths.allSatisfy {!validPath($0)})
         let badData=Data(#"{"type":"data","request_id":7,"offset":249,"bytes":[256],"eof":false}"#.utf8)
         do {_ = try JSONDecoder().decode(DataMessage.self,from:badData);fatalError("accepted invalid byte")} catch {}

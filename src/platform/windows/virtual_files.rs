@@ -231,11 +231,7 @@ pub fn create(
     let mut names = std::collections::HashSet::new();
     for file in &files {
         crate::core::validate_path(&file.name)?;
-        anyhow::ensure!(
-            file.name.replace('/', r"\").encode_utf16().count() < 260,
-            "Windows file descriptor path too long"
-        );
-        anyhow::ensure!(names.insert(file.name.to_lowercase()), "duplicate filename");
+        anyhow::ensure!(names.insert(&file.name), "duplicate filename");
     }
     unsafe {
         Ok(VirtualFiles {
@@ -252,6 +248,38 @@ pub fn create(
         }
         .into())
     }
+}
+// Leave spelling changes to Shell, but reject path/device aliases even after
+// its filename cleanup. The original spelling is returned unchanged.
+fn descriptor_name(path: &str) -> Result<Vec<u16>> {
+    for part in path.split('/') {
+        if part.ends_with([' ', '.']) || part.chars().any(|c| c.is_control() || "\\:".contains(c)) {
+            return Err(HRESULT::from_win32(ERROR_INVALID_NAME.0).into());
+        }
+        let cleaned: String = part.chars().filter(|c| !"<>\"|?*".contains(*c)).collect();
+        let cleaned = cleaned.trim_end_matches([' ', '.']);
+        let stem = cleaned
+            .split('.')
+            .next()
+            .unwrap()
+            .trim_end_matches(' ')
+            .to_ascii_uppercase();
+        let numbered_device = stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|suffix| suffix.chars().count() == 1 && "123456789¹²³".contains(suffix));
+        if cleaned.is_empty()
+            || ["CON", "PRN", "AUX", "NUL", "CLOCK$", "CONIN$", "CONOUT$"].contains(&stem.as_str())
+            || numbered_device
+        {
+            return Err(HRESULT::from_win32(ERROR_INVALID_NAME.0).into());
+        }
+    }
+    let name: Vec<_> = path.replace('/', r"\").encode_utf16().collect();
+    if name.len() >= 260 {
+        return Err(HRESULT::from_win32(ERROR_FILENAME_EXCED_RANGE.0).into());
+    }
+    Ok(name)
 }
 pub fn format(id: u16, index: i32, medium: TYMED) -> FORMATETC {
     FORMATETC {
@@ -339,6 +367,9 @@ impl IDataObject_Impl for VirtualFiles_Impl {
             let mut bytes = vec![0u8; 4 + size_of::<FILEDESCRIPTORW>() * self.files.len()];
             bytes[..4].copy_from_slice(&(self.files.len() as u32).to_le_bytes());
             for (i, file) in self.files.iter().enumerate() {
+                let name = descriptor_name(&file.name).inspect_err(|error| {
+                    log::warn!(target: "clipboard", "file name cannot be represented by Windows: {error}");
+                })?;
                 let mut fd = FILEDESCRIPTORW {
                     dwFlags: (if file.directory {
                         0
@@ -365,14 +396,9 @@ impl IDataObject_Impl for VirtualFiles_Impl {
                         dwHighDateTime: (ticks >> 32) as u32,
                     };
                 }
-                let mut name = [0u16; 260];
-                for (out, c) in name
-                    .iter_mut()
-                    .zip(file.name.replace('/', r"\").encode_utf16())
-                {
-                    *out = c;
-                }
-                fd.cFileName = name;
+                let mut filename = [0u16; 260];
+                filename[..name.len()].copy_from_slice(&name);
+                fd.cFileName = filename;
                 unsafe {
                     std::ptr::write_unaligned(
                         bytes
@@ -484,6 +510,64 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
     #[test]
+    fn unsafe_windows_names_fail_when_ole_requests_descriptors() {
+        let source = Arc::new(PatternSource::new(16));
+        for name in [
+            "a:b",
+            "a\\b",
+            "CON.txt",
+            "COM¹.txt",
+            "name.",
+            "name ",
+            "name:stream",
+            "C?ON.txt",
+            "CON .txt",
+            "LPT*1.txt",
+            "..? ",
+            "?*",
+            " . . ",
+            "folder/..?. /file.txt",
+        ] {
+            let object = create(
+                vec![PresentedFile {
+                    name: name.into(),
+                    directory: false,
+                    modified_ms: None,
+                    source: source.clone(),
+                }],
+                None,
+                false,
+            )
+            .unwrap();
+            let request = format(
+                unsafe { RegisterClipboardFormatW(w!("FileGroupDescriptorW")) } as u16,
+                -1,
+                TYMED_HGLOBAL,
+            );
+            unsafe {
+                object.QueryGetData(&request).ok().unwrap();
+                assert_eq!(
+                    object.GetData(&request).err().unwrap().code(),
+                    HRESULT::from_win32(ERROR_INVALID_NAME.0)
+                );
+            }
+        }
+        assert_eq!(
+            descriptor_name(&"a".repeat(260)).err().unwrap().code(),
+            HRESULT::from_win32(ERROR_FILENAME_EXCED_RANGE.0)
+        );
+        assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
+    }
+    #[test]
+    fn shell_receives_original_filename_spelling() {
+        for name in ["a?.txt", "a*b.txt", "a<\"b>|.txt", "folder?/a.txt"] {
+            assert_eq!(
+                String::from_utf16(&descriptor_name(name).unwrap()).unwrap(),
+                name.replace('/', r"\")
+            );
+        }
+    }
+    #[test]
     fn shell_move_finishes_the_batch_before_recycling_sources() {
         use crate::core::transport::{Identity, Node, Peer, RemoteSource};
         use windows::Win32::System::Ole::*;
@@ -594,37 +678,49 @@ mod tests {
         let root = std::env::temp_dir().join(crate::core::engine::new_id());
         std::fs::create_dir(&root).unwrap();
         let source = Arc::new(PatternSource::new(31));
-        let object = create(
-            vec![
-                PresentedFile {
-                    name: "tree".into(),
-                    directory: true,
-                    modified_ms: None,
-                    source: source.clone(),
-                },
-                PresentedFile {
-                    name: "tree/empty".into(),
-                    directory: true,
-                    modified_ms: None,
-                    source: source.clone(),
-                },
-                PresentedFile {
-                    name: "tree/nested".into(),
-                    directory: true,
-                    modified_ms: None,
-                    source: source.clone(),
-                },
-                PresentedFile {
-                    name: "tree/nested/文件.bin".into(),
-                    directory: false,
-                    modified_ms: Some(1700000000000),
-                    source: source.clone(),
-                },
-            ],
-            None,
-            false,
-        )
-        .unwrap();
+        let mut files = vec![
+            PresentedFile {
+                name: "tree".into(),
+                directory: true,
+                modified_ms: None,
+                source: source.clone(),
+            },
+            PresentedFile {
+                name: "tree/empty".into(),
+                directory: true,
+                modified_ms: None,
+                source: source.clone(),
+            },
+            PresentedFile {
+                name: "tree/nested".into(),
+                directory: true,
+                modified_ms: None,
+                source: source.clone(),
+            },
+            PresentedFile {
+                name: "tree/nested/文件.bin".into(),
+                directory: false,
+                modified_ms: Some(1700000000000),
+                source: source.clone(),
+            },
+        ];
+        for name in [
+            "tree/question?.txt",
+            "tree/case.txt",
+            "tree/CASE.txt",
+            "tree/star*.txt",
+            "tree/angle<>.txt",
+            "tree/quote\".txt",
+            "tree/pipe|.txt",
+        ] {
+            files.push(PresentedFile {
+                name: name.into(),
+                directory: false,
+                modified_ms: None,
+                source: source.clone(),
+            });
+        }
+        let object = create(files, None, false).unwrap();
         assert_eq!(
             source.bytes_read.load(std::sync::atomic::Ordering::Relaxed),
             0
@@ -667,6 +763,15 @@ mod tests {
             .unwrap()
             .as_millis();
         assert_eq!(modified, 1700000000000);
+        let copied: Vec<_> = std::fs::read_dir(root.join("tree"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_file())
+            .collect();
+        assert_eq!(copied.len(), 7);
+        for path in copied {
+            assert_eq!(std::fs::read(path).unwrap(), (0..31).collect::<Vec<u8>>());
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

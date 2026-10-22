@@ -88,11 +88,22 @@
   "invalid_paths": [
     "../secret",
     "/etc/passwd",
-    "C:/secret",
-    "a\\b",
-    "a:b",
-    "CON.txt",
+    "a/../b",
+    "a/./b",
+    "a\u0000b",
     "folder//file",
-    "name."
+    "folder/"
+  ],
+  "valid_paths": [
+    "folder/中文.txt",
+    "a:b",
+    "a\\b",
+    "CON.txt",
+    "COM¹.txt",
+    "name.",
+    "name ",
+    "a?.txt",
+    "a\nb",
+    "C:/secret"
   ]
 }

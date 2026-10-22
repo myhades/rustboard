@@ -120,23 +120,7 @@ pub fn validate_path(path: &str) -> Result<()> {
             !part.is_empty() && part != "." && part != "..",
             "unsafe path component"
         );
-        ensure!(!part.ends_with([' ', '.']), "unsafe path suffix");
-        ensure!(
-            !part
-                .chars()
-                .any(|c| c.is_control() || "\\:<>\"|?*".contains(c)),
-            "unsafe path character"
-        );
-        let stem = part.split('.').next().unwrap().to_ascii_uppercase();
-        let numbered_device = stem
-            .strip_prefix("COM")
-            .or_else(|| stem.strip_prefix("LPT"))
-            .is_some_and(|suffix| suffix.chars().count() == 1 && "123456789¹²³".contains(suffix));
-        ensure!(
-            !["CON", "PRN", "AUX", "NUL", "CLOCK$", "CONIN$", "CONOUT$"].contains(&stem.as_str())
-                && !numbered_device,
-            "reserved device name"
-        );
+        ensure!(!part.contains('\0'), "unsafe path character");
     }
     Ok(())
 }
@@ -220,8 +204,7 @@ impl Offer {
                     );
                     uuid::Uuid::parse_str(&file.file_id)?;
                     ensure!(
-                        ids.insert(&file.file_id)
-                            && paths.insert(file.relative_path.to_lowercase()),
+                        ids.insert(&file.file_id) && paths.insert(&file.relative_path),
                         "duplicate file"
                     );
                     ensure!(
@@ -411,24 +394,30 @@ mod tests {
     }
     #[test]
     fn unsafe_paths() {
-        for path in [
-            "",
-            "/etc/passwd",
-            "../secret",
-            "a/../b",
-            "C:/x",
-            "a\\b",
-            "a:b",
-            "a\0b",
-            "CON.txt",
-            "COM¹.txt",
-            "CONIN$",
-            "x.",
-            "a//b",
-        ] {
+        for path in ["", "/etc/passwd", "../secret", "a/../b", "a\0b", "a//b"] {
             assert!(validate_path(path).is_err(), "{path}");
         }
         validate_path("folder/中文.txt").unwrap();
+    }
+    #[test]
+    fn platform_names_are_preserved_in_offers() {
+        let files = [
+            "a:b", "a\\b", "CON.txt", "name.", "name ", "a?.txt", "A.txt", "a.txt",
+        ]
+        .map(|name| file(name, false))
+        .to_vec();
+        offer(Content::Files {
+            files: files.clone(),
+        })
+        .validate(0)
+        .unwrap();
+        let mut duplicates = files;
+        duplicates.push(file("a.txt", false));
+        assert!(
+            offer(Content::Files { files: duplicates })
+                .validate(0)
+                .is_err()
+        );
     }
     #[test]
     fn framing_bound() {

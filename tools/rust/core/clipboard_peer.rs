@@ -57,6 +57,32 @@ fn main() -> anyhow::Result<()> {
                         HashMap::new(),
                     )?;
                 }
+                "names" => {
+                    let names: Vec<(String, bool)> =
+                        serde_json::from_slice(&std::fs::read(out.join("names.json"))?)?;
+                    let mut files = Vec::new();
+                    let mut map: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
+                    sources.clear();
+                    for (name, directory) in names {
+                        let id = new_id();
+                        let source = Arc::new(pattern::PatternSource::new(16));
+                        files.push(FileEntry {
+                            file_id: id.clone(),
+                            relative_path: name,
+                            directory,
+                            size: Some(if directory { 0 } else { 16 }),
+                            version: "names".into(),
+                            modified_ms: None,
+                            executable: None,
+                            media_type: "application/octet-stream".into(),
+                        });
+                        if !directory {
+                            map.insert(id, source.clone());
+                            sources.push(source);
+                        }
+                    }
+                    engine.local(Content::Files { files }, map)?;
+                }
                 "image" => {
                     let source = Arc::new(LocalFile::open(&out.join("image.png"))?);
                     let id = new_id();

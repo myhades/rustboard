@@ -23,14 +23,7 @@ pub fn manifest(roots: Vec<PathBuf>) -> Result<Vec<(PathBuf, FileEntry)>> {
     while let Some((path, relative_path)) = pending.pop() {
         ensure!(entries.len() < MAX_FILES, "too many files");
         validate_path(&relative_path)?;
-        ensure!(
-            relative_path.split('/').count() <= 64,
-            "directory nesting too deep"
-        );
-        ensure!(
-            names.insert(relative_path.to_lowercase()),
-            "duplicate filename"
-        );
+        ensure!(names.insert(relative_path.clone()), "duplicate filename");
         let metadata = fs::symlink_metadata(&path)?;
         ensure!(
             !metadata.file_type().is_symlink() && (metadata.is_file() || metadata.is_dir()),

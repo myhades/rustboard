@@ -46,19 +46,16 @@ struct Offer: Codable {
             let parent = (file.relative_path as NSString).deletingLastPathComponent
             guard parent.isEmpty || directories.contains(parent), !file.directory || file.size == 0 else {throw WireError.invalid}
             guard UUID(uuidString: file.file_id) != nil, ids.insert(file.file_id.lowercased()).inserted,
-                  names.insert(file.relative_path.lowercased()).inserted,
+                  names.insert(file.relative_path).inserted,
                   !file.version.isEmpty, file.version.utf8.count <= 128, let size = file.size, size <= Int64.max,
                   file.modified_ms.map({$0 <= 253402300799999}) ?? true, file.media_type.utf8.count <= 128, validPath(file.relative_path) else {throw WireError.invalid}
         }
     }
 }
 func validPath(_ path: String) -> Bool {
-    guard !path.isEmpty, path.utf8.count <= 1024, path.split(separator: "/").count <= 64, !path.contains("\\"), !path.contains(":"), !path.unicodeScalars.contains(where: {$0.value < 32 || $0.value == 127}) else {return false}
+    guard !path.isEmpty, path.utf8.count <= 1024, path.split(separator: "/").count <= 64, !path.contains("\0") else {return false}
     for part in path.split(separator: "/", omittingEmptySubsequences: false) {
-        guard !part.isEmpty, !part.contains(where: {"<>\"|?*".contains($0)}), part != ".", part != "..", !part.hasSuffix("."), !part.hasSuffix(" ") else {return false}
-        let base = part.split(separator: ".")[0].uppercased()
-        if ["CON","PRN","AUX","NUL","CLOCK$","CONIN$","CONOUT$"].contains(base) {return false}
-        if (base.hasPrefix("COM") || base.hasPrefix("LPT")) && base.count == 4 && "123456789¹²³".contains(base.last!) {return false}
+        guard !part.isEmpty, part != ".", part != ".." else {return false}
     }
     return true
 }

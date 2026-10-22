@@ -114,6 +114,8 @@ These features are disabled by default. Add the following to your config to enab
   }
 ```
 
+The 50 MB limit applies to the whole batch. Cut items are not downloaded in advance.
+
 #### Peers
 
 `peers` stores each peer's address and certificate fingerprint.
@@ -134,9 +136,11 @@ Each pair connects independently, so A-B and B-C pairings do not establish an A-
 
 ### File transfers
 
-Copying a file initially sends only metadata. Windows exposes the remote file as an OLE virtual file, macOS uses a File Provider placeholder, and Linux exposes it through a read-only FUSE mount. Reads from the destination application trigger the content fetch from the source in bounded chunks.
+Copying a file initially sends only metadata. Windows exposes the remote file as an OLE virtual file, macOS uses a File Provider placeholder, and Linux exposes it through a FUSE mount. Reads from the destination application trigger the content fetch from the source in bounded chunks.
 
 An active transfer holds a reference to its batch, so replacing the clipboard does not interrupt it. Rustboard retains the current batch and any older batches still being read, then releases them when no longer needed. Temporary data is cleaned up on exit and leftovers on startup.
+
+Use Ctrl+X on Windows or Linux, or Cmd+Option+V in Finder, to move files and folders. Rustboard waits for the whole batch to finish before attempting to recycle the originals. Items that cannot be recycled stay at the source. For cuts received on macOS, completion means File Provider has downloaded every file, not that Finder has finished writing the destination.
 
 ### Universal Clipboard
 

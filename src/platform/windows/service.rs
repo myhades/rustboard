@@ -50,7 +50,7 @@ pub fn enabled() -> Result<bool> {
 }
 pub fn start(register: bool) -> Result<()> {
     let base = base()?;
-    let agent = base.join("bin/rustboardd.exe");
+    let agent = base.join("bin").join("rustboardd.exe");
     ensure!(agent.is_file(), "agent is not installed");
     if register {
         let value: Vec<u16> = format!("\"{}\"", agent.display())
@@ -91,7 +91,7 @@ pub fn start(register: bool) -> Result<()> {
     anyhow::bail!("agent failed to start")
 }
 pub fn stop(unregister: bool) -> Result<()> {
-    let agent = base()?.join("bin/rustboardd.exe");
+    let agent = base()?.join("bin").join("rustboardd.exe");
     if unregister {
         let result = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, KEY, w!("Rustboard")) };
         if result != ERROR_FILE_NOT_FOUND && result != ERROR_PATH_NOT_FOUND {

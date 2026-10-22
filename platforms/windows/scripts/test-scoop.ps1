@@ -29,6 +29,9 @@ try {
     if (Test-Path $config) {throw 'Pair initialized config'}
     & $cli start
     if ($LASTEXITCODE) {throw 'First start failed'}
+    $startup=Get-ItemPropertyValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Rustboard
+    $expected='"'+(Join-Path $env:LOCALAPPDATA 'Rustboard\bin\rustboardd.exe')+'"'
+    if ($startup -cne $expected) {throw 'Autostart command must use a quoted native Windows path'}
     & $cli status --json
     if ($LASTEXITCODE) {throw 'Installed CLI/service not ready'}
     $config=Join-Path $env:LOCALAPPDATA 'Rustboard/default/config.json'

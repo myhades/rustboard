@@ -63,7 +63,7 @@ fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
             std::collections::HashMap::from([(id, source.clone() as Arc<dyn ReadAt>)]),
         )
         .unwrap();
-    let server = a.serve(listener).unwrap();
+    let server = a.serve(listener, |_| false).unwrap();
     b.sync_once(&peer).unwrap();
     assert!(
         a.local_ipc(IpcOperation::GetFileOffers).unwrap()["offers"]
@@ -183,7 +183,7 @@ fn mutual_tls_offer_lazy_read_and_untrusted_rejection() {
             std::collections::HashMap::from([(id, source.clone() as Arc<dyn ReadAt>)]),
         )
         .unwrap();
-    let server = a.serve(listener).unwrap();
+    let server = a.serve(listener, |_| false).unwrap();
     b.sync_once(&peer).unwrap();
     assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
     let ipc_read = || IpcOperation::ReadBinary {
@@ -277,7 +277,7 @@ fn source_failure_mid_window_does_not_return_partial_data() {
             std::collections::HashMap::from([(id, source.clone() as Arc<dyn ReadAt>)]),
         )
         .unwrap();
-    let server = a.serve(listener).unwrap();
+    let server = a.serve(listener, |_| false).unwrap();
     b.sync_once(&peer).unwrap();
     let remote = RemoteSource::new(b.clone(), peer, offer.offer_id.clone(), file);
     remote.read_at(0, &mut [0; MAX_CHUNK]).unwrap();
@@ -288,6 +288,75 @@ fn source_failure_mid_window_does_not_return_partial_data() {
     assert!(remote.connection.lock().unwrap().bytes.is_empty());
     drop(remote);
     a.stop.store(true, Ordering::Release);
+    server.join().unwrap();
+}
+
+#[test]
+fn failed_platform_recycle_keeps_the_offer_and_is_not_retried() {
+    static RECYCLES: AtomicUsize = AtomicUsize::new(0);
+    let source = Node::new(Identity::generate().unwrap(), vec![]);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let peer = Peer {
+        address: listener.local_addr().unwrap(),
+        fingerprint: source.identity.pin(),
+    };
+    let target = Node::new(Identity::generate().unwrap(), vec![peer.clone()]);
+    source.peers.lock().unwrap().push(Peer {
+        address: peer.address,
+        fingerprint: target.identity.pin(),
+    });
+    let file = FileEntry {
+        file_id: engine::new_id(),
+        relative_path: "file".into(),
+        directory: false,
+        modified_ms: None,
+        executable: None,
+        size: Some(4),
+        version: "v".into(),
+        media_type: "application/octet-stream".into(),
+    };
+    let offer = source
+        .engine
+        .lock()
+        .unwrap()
+        .local_files(
+            vec![file.clone()],
+            std::collections::HashMap::from([(
+                file.file_id.clone(),
+                Arc::new(PatternSource::new(4)) as Arc<dyn ReadAt>,
+            )]),
+            vec![PathBuf::from("file")],
+            true,
+        )
+        .unwrap();
+    let server = source
+        .serve(listener, |paths| {
+            assert_eq!(paths, [PathBuf::from("file")]);
+            RECYCLES.fetch_add(1, Ordering::SeqCst);
+            false
+        })
+        .unwrap();
+    target.sync_once(&peer).unwrap();
+    assert!(target.recycle_remote(&offer.offer_id).is_err());
+    assert_eq!(RECYCLES.load(Ordering::SeqCst), 0);
+    let remote = RemoteSource::new(target.clone(), peer, offer.offer_id.clone(), file);
+    assert_eq!(remote.read_at(0, &mut [0; 4]).unwrap(), 4);
+    target.recycle_remote(&offer.offer_id).unwrap();
+    target.recycle_remote(&offer.offer_id).unwrap();
+    assert_eq!(RECYCLES.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        source
+            .engine
+            .lock()
+            .unwrap()
+            .current
+            .as_ref()
+            .unwrap()
+            .offer_id,
+        offer.offer_id
+    );
+    drop(remote);
+    source.stop.store(true, Ordering::Release);
     server.join().unwrap();
 }
 
@@ -305,7 +374,7 @@ fn peer_connection_tracks_sync_success_and_failure() {
         address: "127.0.0.1:1".parse().unwrap(),
         fingerprint: b.identity.pin(),
     });
-    let server = a.serve(listener).unwrap();
+    let server = a.serve(listener, |_| false).unwrap();
     b.start_sync();
     let wait = |expected| {
         let deadline = Instant::now() + Duration::from_secs(10);

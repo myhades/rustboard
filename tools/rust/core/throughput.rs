@@ -46,7 +46,7 @@ fn main() -> anyhow::Result<()> {
         },
         HashMap::from([(id, source.clone() as Arc<dyn ReadAt>)]),
     )?;
-    let server = a.serve(listener)?;
+    let server = a.serve(listener, |_| false)?;
     let result = (|| -> anyhow::Result<()> {
         b.sync_once(&peer)?;
         anyhow::ensure!(

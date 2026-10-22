@@ -66,7 +66,7 @@ fn main() -> Result<()> {
             HashMap::from([(id, reader)]),
         )?;
         let listener = TcpListener::bind(peer.address)?;
-        let server = node.serve(listener)?;
+        let server = node.serve(listener, |_| false)?;
         println!(
             "{}",
             serde_json::json!({"ready":true,"pin":node.identity.pin(),"source_bytes":args.get(6).is_none().then(|| source.bytes_read.load(Ordering::Relaxed))})

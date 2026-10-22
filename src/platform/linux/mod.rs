@@ -67,7 +67,7 @@ pub fn run() -> Result<()> {
     ipc::protect_dir(&images)?;
     crate::app::image_file::prepare(&images)?;
     if let Some(address) = listen {
-        node.serve(std::net::TcpListener::bind(address)?)?;
+        node.serve(std::net::TcpListener::bind(address)?, files::recycle)?;
     }
     server.spawn(node.clone());
     node.start_sync();

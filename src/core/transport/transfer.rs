@@ -41,8 +41,15 @@ impl Node {
         );
         Ok(())
     }
-    pub fn finish_item(&self, id: &str, file: &str, moving: bool) -> Result<()> {
-        let complete = self.engine.lock().unwrap().received(id, file, moving)?;
+    pub fn file_downloaded(&self, id: &str, file: &str) -> Result<()> {
+        let complete = self.engine.lock().unwrap().file_downloaded(id, file)?;
+        if complete {
+            self.recycle_remote(id)?;
+        }
+        Ok(())
+    }
+    pub fn item_moved(&self, id: &str, file: &str) -> Result<()> {
+        let complete = self.engine.lock().unwrap().item_moved(id, file)?;
         if complete {
             self.recycle_remote(id)?;
         }

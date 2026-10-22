@@ -393,7 +393,9 @@ pub fn run() -> anyhow::Result<()> {
         configured
     };
     if let Some(address) = listen {
-        node.serve(std::net::TcpListener::bind(address)?)?;
+        node.serve(std::net::TcpListener::bind(address)?, |paths| {
+            super::recycle::recycle(paths).is_ok()
+        })?;
     }
     node.start_sync();
     ipc.spawn(node.clone());

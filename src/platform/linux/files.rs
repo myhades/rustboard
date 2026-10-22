@@ -141,7 +141,7 @@ impl Files {
         if directory && self.children.get(&ino).is_some_and(|c| !c.is_empty()) {
             return Err(libc::ENOTEMPTY);
         }
-        let _ = self.node.finish_item(&entry.batch, &file.file_id, true);
+        let _ = self.node.item_moved(&entry.batch, &file.file_id);
         self.entries.remove(&ino);
         self.children.remove(&ino);
         self.children.get_mut(&parent).unwrap().remove(name);

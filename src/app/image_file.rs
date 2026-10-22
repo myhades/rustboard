@@ -228,7 +228,7 @@ mod tests {
             fingerprint: b.identity.pin(),
         });
         b.peers.lock().unwrap().push(peer.clone());
-        let server = a.serve(listener).unwrap();
+        let server = a.serve(listener, |_| false).unwrap();
         let mut download = Download::default();
         for replaced in [false, true] {
             let source = Arc::new(Source {

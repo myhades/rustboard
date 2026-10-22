@@ -515,7 +515,11 @@ mod tests {
         )
         .unwrap();
         let offer = source.engine.lock().unwrap().current.clone().unwrap();
-        let server = source.serve(listener).unwrap();
+        let server = source
+            .serve(listener, |paths| {
+                super::super::recycle::recycle(paths).is_ok()
+            })
+            .unwrap();
         target.sync_once(&peer).unwrap();
         let sources = RemoteSource::batch(target.clone(), peer, offer.clone());
         let object = create(
@@ -712,7 +716,7 @@ mod tests {
                     .collect(),
             )
             .unwrap();
-        let server = source_node.serve(listener).unwrap();
+        let server = source_node.serve(listener, |_| false).unwrap();
         target_node.sync_once(&peer).unwrap();
         let object = create(
             files

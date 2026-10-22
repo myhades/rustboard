@@ -23,10 +23,10 @@ fn main() -> anyhow::Result<()> {
     let out = std::path::PathBuf::from(&args[4]);
     std::fs::create_dir_all(&out)?;
     std::fs::write(out.join("peer-pin.txt"), node.identity.pin())?;
-    node.serve(std::net::TcpListener::bind(format!(
-        "127.0.0.1:{}",
-        args[3]
-    ))?)?;
+    node.serve(
+        std::net::TcpListener::bind(format!("127.0.0.1:{}", args[3]))?,
+        |_| false,
+    )?;
     let deadline = Instant::now() + Duration::from_secs(1800);
     let mut last = String::new();
     let mut mode = String::new();

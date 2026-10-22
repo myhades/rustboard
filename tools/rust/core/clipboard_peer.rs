@@ -28,7 +28,7 @@ fn main() -> anyhow::Result<()> {
     )?;
     node.engine.lock().unwrap().persist_clock(clock)?;
     std::fs::write(out.join("peer-pin.txt"), node.identity.pin())?;
-    node.serve(std::net::TcpListener::bind(&args[3])?)?;
+    node.serve(std::net::TcpListener::bind(&args[3])?, |_| false)?;
     let mut mode = String::new();
     let mut sources: Vec<Arc<pattern::PatternSource>> = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(1800);

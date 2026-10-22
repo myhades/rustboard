@@ -28,9 +28,94 @@ struct FileBatch {
     readers: Weak<()>,
     roots: Vec<PathBuf>,
     sent: HashMap<String, HashMap<usize, u64>>,
-    received: HashSet<String>,
-    moved: HashSet<String>,
+    received: HashSet<usize>,
+    moved: HashSet<usize>,
     move_finished: bool,
+}
+impl FileBatch {
+    // Reads by different peers cannot complete a move together.
+    fn sent(&mut self, peer: &str, file: &str, offset: u64, length: u64) {
+        if self.roots.is_empty() {
+            return;
+        }
+        let Some(&index) = self.entries.get(file) else {
+            return;
+        };
+        if self.sent.len() >= 16 && !self.sent.contains_key(peer) {
+            return;
+        }
+        let prefix = self
+            .sent
+            .entry(peer.into())
+            .or_default()
+            .entry(index)
+            .or_default();
+        if offset <= *prefix {
+            *prefix = (*prefix).max(offset.saturating_add(length));
+        }
+    }
+    fn take_recycle_roots(&mut self, peer: &str) -> Result<Vec<PathBuf>> {
+        let Content::Files { files } = &self.offer.content else {
+            anyhow::bail!("not files")
+        };
+        ensure!(
+            files.iter().enumerate().all(|(i, f)| f.directory
+                || f.size.is_some_and(|size| {
+                    self.sent
+                        .get(peer)
+                        .and_then(|sent| sent.get(&i))
+                        .copied()
+                        .unwrap_or(0)
+                        >= size
+                })),
+            "batch transfer incomplete"
+        );
+        Ok(std::mem::take(&mut self.roots))
+    }
+    // Download completion is sufficient only for source-initiated cuts.
+    fn file_downloaded(&mut self, file: &str) -> Result<bool> {
+        let Content::Files { files } = &self.offer.content else {
+            anyhow::bail!("not files")
+        };
+        let index = *self
+            .entries
+            .get(file)
+            .ok_or_else(|| anyhow::anyhow!("file not found"))?;
+        if !files[index].directory {
+            self.received.insert(index);
+        }
+        let complete = self.offer.cut
+            && !self.received.is_empty()
+            && files
+                .iter()
+                .enumerate()
+                .all(|(i, f)| f.directory || self.received.contains(&i));
+        Ok(self.finish_move(complete))
+    }
+    // Native moves acknowledge every selected root, including empty directories.
+    fn item_moved(&mut self, file: &str) -> Result<bool> {
+        let Content::Files { files } = &self.offer.content else {
+            anyhow::bail!("not files")
+        };
+        let index = *self
+            .entries
+            .get(file)
+            .ok_or_else(|| anyhow::anyhow!("file not found"))?;
+        self.moved.insert(index);
+        let complete = files
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| !f.relative_path.contains('/'))
+            .all(|(i, _)| self.moved.contains(&i));
+        Ok(self.finish_move(complete))
+    }
+    fn finish_move(&mut self, complete: bool) -> bool {
+        if self.move_finished || !complete {
+            return false;
+        }
+        self.move_finished = true;
+        true
+    }
 }
 pub struct Engine {
     pub device_id: String,
@@ -299,28 +384,9 @@ impl Engine {
         self.expire();
         Ok(offer)
     }
-    // Track delivered ranges per peer; reads by different peers cannot complete a move together.
     pub fn sent(&mut self, offer: &str, peer: &str, file: &str, offset: u64, length: u64) {
-        let Some(batch) = self.batches.get_mut(offer) else {
-            return;
-        };
-        if batch.roots.is_empty() {
-            return;
-        }
-        let Some(&index) = batch.entries.get(file) else {
-            return;
-        };
-        if batch.sent.len() >= 16 && !batch.sent.contains_key(peer) {
-            return;
-        }
-        let prefix = batch
-            .sent
-            .entry(peer.into())
-            .or_default()
-            .entry(index)
-            .or_default();
-        if offset <= *prefix {
-            *prefix = (*prefix).max(offset.saturating_add(length));
+        if let Some(batch) = self.batches.get_mut(offer) {
+            batch.sent(peer, file, offset, length);
         }
     }
     pub fn take_recycle_roots(&mut self, offer: &str, peer: &str) -> Result<Vec<PathBuf>> {
@@ -333,58 +399,19 @@ impl Engine {
             batch.offer.source_device == self.device_id,
             "source is not local"
         );
-        let Content::Files { files } = &batch.offer.content else {
-            anyhow::bail!("not files")
-        };
-        ensure!(
-            files.iter().enumerate().all(|(i, f)| f.directory
-                || f.size.is_some_and(|size| {
-                    batch
-                        .sent
-                        .get(peer)
-                        .and_then(|sent| sent.get(&i))
-                        .copied()
-                        .unwrap_or(0)
-                        >= size
-                })),
-            "batch transfer incomplete"
-        );
-        Ok(std::mem::take(&mut batch.roots))
+        batch.take_recycle_roots(peer)
     }
-    // A download receipt is only enough for source-initiated cuts. A native move
-    // must acknowledge every selected root, including empty directories.
-    pub fn received(&mut self, offer: &str, file: &str, moving: bool) -> Result<bool> {
-        let batch = self
-            .batches
+    pub fn file_downloaded(&mut self, offer: &str, file: &str) -> Result<bool> {
+        self.batches
             .get_mut(offer)
-            .ok_or_else(|| anyhow::anyhow!("file offer expired"))?;
-        let Content::Files { files } = &batch.offer.content else {
-            anyhow::bail!("not files")
-        };
-        let index = *batch
-            .entries
-            .get(file)
-            .ok_or_else(|| anyhow::anyhow!("file not found"))?;
-        if moving {
-            batch.moved.insert(file.into());
-        } else if !files[index].directory {
-            batch.received.insert(file.into());
-        }
-        let moved = files
-            .iter()
-            .filter(|f| !f.relative_path.contains('/'))
-            .all(|f| batch.moved.contains(&f.file_id));
-        let downloaded = batch.offer.cut
-            && files.iter().any(|f| !f.directory)
-            && files
-                .iter()
-                .filter(|f| !f.directory)
-                .all(|f| batch.received.contains(&f.file_id));
-        if batch.move_finished || !(moved || downloaded) {
-            return Ok(false);
-        }
-        batch.move_finished = true;
-        Ok(true)
+            .ok_or_else(|| anyhow::anyhow!("file offer expired"))?
+            .file_downloaded(file)
+    }
+    pub fn item_moved(&mut self, offer: &str, file: &str) -> Result<bool> {
+        self.batches
+            .get_mut(offer)
+            .ok_or_else(|| anyhow::anyhow!("file offer expired"))?
+            .item_moved(file)
     }
     pub fn accept(&mut self, mut offer: Offer, authenticated_device: &str) -> Result<bool> {
         offer.validate(now_ms())?;
@@ -492,27 +519,27 @@ mod tests {
         let files = offer.content.entries();
         assert!(
             !engine
-                .received(&offer.offer_id, &files[0].file_id, false)
+                .file_downloaded(&offer.offer_id, &files[0].file_id)
                 .unwrap()
         );
         assert!(
             !engine
-                .received(&offer.offer_id, &files[1].file_id, false)
+                .file_downloaded(&offer.offer_id, &files[1].file_id)
                 .unwrap()
         );
         assert!(
             !engine
-                .received(&offer.offer_id, &files[0].file_id, true)
+                .item_moved(&offer.offer_id, &files[0].file_id)
                 .unwrap()
         );
         assert!(
             engine
-                .received(&offer.offer_id, &files[1].file_id, true)
+                .item_moved(&offer.offer_id, &files[1].file_id)
                 .unwrap()
         );
         assert!(
             !engine
-                .received(&offer.offer_id, &files[1].file_id, true)
+                .item_moved(&offer.offer_id, &files[1].file_id)
                 .unwrap()
         );
         let offer = batch(&mut engine);
@@ -520,13 +547,68 @@ mod tests {
         engine.batches.get_mut(&offer.offer_id).unwrap().offer.cut = true;
         assert!(
             !engine
-                .received(&offer.offer_id, &files[0].file_id, false)
+                .file_downloaded(&offer.offer_id, &files[0].file_id)
                 .unwrap()
         );
-        assert!(engine.received(&offer.offer_id, "unknown", false).is_err());
+        assert!(engine.file_downloaded(&offer.offer_id, "unknown").is_err());
         assert!(
             engine
-                .received(&offer.offer_id, &files[1].file_id, false)
+                .file_downloaded(&offer.offer_id, &files[1].file_id)
+                .unwrap()
+        );
+    }
+    #[test]
+    fn folder_receipts_distinguish_downloads_from_moved_roots() {
+        let files: Vec<_> = ["folder", "folder/file", "empty", "note"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, path)| FileEntry {
+                file_id: new_id(),
+                relative_path: path.into(),
+                directory: i == 0 || i == 2,
+                size: Some(if i == 0 || i == 2 { 0 } else { 4 }),
+                version: "v".into(),
+                modified_ms: None,
+                executable: None,
+                media_type: "application/octet-stream".into(),
+            })
+            .collect();
+        let mut engine = Engine::new(new_id());
+        let offer = engine
+            .local_files(files.clone(), HashMap::new(), vec![], false)
+            .unwrap();
+        let id = &offer.offer_id;
+        assert!(engine.item_moved(id, "unknown").is_err());
+        assert!(!engine.item_moved(id, &files[1].file_id).unwrap());
+        assert!(!engine.item_moved(id, &files[0].file_id).unwrap());
+        assert!(!engine.item_moved(id, &files[3].file_id).unwrap());
+        assert!(engine.item_moved(id, &files[2].file_id).unwrap());
+        assert!(!engine.item_moved(id, &files[2].file_id).unwrap());
+
+        let offer = engine
+            .local_files(files.clone(), HashMap::new(), vec![], true)
+            .unwrap();
+        let id = &offer.offer_id;
+        assert!(!engine.file_downloaded(id, &files[0].file_id).unwrap());
+        assert!(!engine.file_downloaded(id, &files[1].file_id).unwrap());
+        assert!(!engine.file_downloaded(id, &files[2].file_id).unwrap());
+        assert!(engine.file_downloaded(id, &files[3].file_id).unwrap());
+        // A later native move cannot complete the same batch again.
+        for file in &files {
+            assert!(!engine.item_moved(id, &file.file_id).unwrap());
+        }
+
+        let offer = engine
+            .local_files(vec![files[2].clone()], HashMap::new(), vec![], true)
+            .unwrap();
+        assert!(
+            !engine
+                .file_downloaded(&offer.offer_id, &files[2].file_id)
+                .unwrap()
+        );
+        assert!(
+            engine
+                .item_moved(&offer.offer_id, &files[2].file_id)
                 .unwrap()
         );
     }

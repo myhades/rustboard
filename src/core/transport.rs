@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -83,7 +84,11 @@ impl Node {
         }
         Ok(())
     }
-    pub fn serve(self: &Arc<Self>, listener: TcpListener) -> Result<std::thread::JoinHandle<()>> {
+    pub fn serve(
+        self: &Arc<Self>,
+        listener: TcpListener,
+        recycle: fn(&[PathBuf]) -> bool,
+    ) -> Result<std::thread::JoinHandle<()>> {
         listener.set_nonblocking(true)?;
         let node = self.clone();
         Ok(std::thread::spawn(move || {
@@ -96,7 +101,7 @@ impl Node {
                         }
                         let n = node.clone();
                         std::thread::spawn(move || {
-                            if let Err(e) = n.session(socket) {
+                            if let Err(e) = n.session(socket, recycle) {
                                 let closed = e
                                     .chain()
                                     .find_map(|cause| cause.downcast_ref::<std::io::Error>())
@@ -142,7 +147,7 @@ impl Node {
             }
         }))
     }
-    fn session(&self, socket: TcpStream) -> Result<()> {
+    fn session(&self, socket: TcpStream, recycle: fn(&[PathBuf]) -> bool) -> Result<()> {
         socket.set_nonblocking(false)?;
         socket.set_read_timeout(Some(Duration::from_secs(5)))?;
         socket.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -207,7 +212,7 @@ impl Node {
                         .lock()
                         .unwrap()
                         .take_recycle_roots(&offer_id, &peer.device())?;
-                    if !paths.is_empty() && crate::platform::recycle(&paths) {
+                    if !paths.is_empty() && recycle(&paths) {
                         let mut engine = self.engine.lock().unwrap();
                         if engine
                             .current

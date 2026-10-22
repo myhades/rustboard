@@ -209,7 +209,7 @@ pub fn run() -> Result<()> {
         configured
     };
     if let Some(address) = listen {
-        node.serve(std::net::TcpListener::bind(address)?)?;
+        node.serve(std::net::TcpListener::bind(address)?, local_files::recycle)?;
     }
     server.spawn(node.clone());
     node.start_sync();

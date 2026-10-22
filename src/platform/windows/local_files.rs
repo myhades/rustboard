@@ -220,7 +220,7 @@ mod tests {
             panic!()
         };
         let file = files[0].clone();
-        let server = a.serve(listener).unwrap();
+        let server = a.serve(listener, |_| false).unwrap();
         b.sync_once(&peer).unwrap();
         let read = |offset| {
             b.local_ipc(crate::core::IpcOperation::ReadBinary {
@@ -271,7 +271,7 @@ mod tests {
             panic!()
         };
         let file = files[0].clone();
-        let server = a.serve(listener).unwrap();
+        let server = a.serve(listener, |_| false).unwrap();
         b.sync_once(&peer).unwrap();
         std::fs::rename(&path, &moved).unwrap();
         std::fs::rename(&moved, &path).unwrap();

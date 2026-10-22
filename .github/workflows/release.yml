@@ -22,10 +22,11 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+      - name: Set up Rust
+        run: rustup show
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          toolchain: 1.99.1
-          components: rustfmt, clippy
+          shared-key: ${{ matrix.os }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
@@ -34,12 +35,10 @@ jobs:
         run: python -c 'import os,tomllib; assert os.environ["RELEASE_TAG"] == "v"+tomllib.load(open("Cargo.toml","rb"))["package"]["version"]'
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-0 libdbus-1-dev pkg-config
-      - run: cargo fmt --all -- --check
-      - run: python scripts/check-vectors.py
-      - run: cargo test --all-targets --locked
-      - run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Check
+        run: python scripts/check.py
       - if: runner.os == 'Windows'
-        run: cargo build --release --locked
+        run: cargo build --release --locked --bins
       - if: runner.os == 'Windows'
         run: ./platforms/windows/scripts/package.ps1 -OutputRoot target/release-assets
       - if: runner.os == 'Windows'
@@ -62,14 +61,10 @@ jobs:
           test "$(brew --prefix)" = /home/linuxbrew/.linuxbrew
           brew config
           python platforms/linux/scripts/test-brew.py
-      - name: Test macOS bridge
-        if: runner.os == 'macOS'
-        timeout-minutes: 10
-        run: bash -x platforms/macos/scripts/test.sh
       - name: Build macOS bundles
         if: runner.os == 'macOS'
         timeout-minutes: 15
-        run: bash -x platforms/macos/scripts/build.sh
+        run: bash platforms/macos/scripts/build.sh
       - name: Test macOS installation
         if: runner.os == 'macOS'
         timeout-minutes: 3
@@ -91,8 +86,6 @@ jobs:
             target/release-assets/*.zip
             target/release-assets/*.tar.gz
             target/release-assets/*.sha256
-            target/macos/*.tar.gz
-            target/macos/*.sha256
   publish:
     needs: build
     runs-on: ubuntu-24.04
@@ -112,11 +105,10 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: release-*
-          path: downloaded
+          path: assets
+          merge-multiple: true
       - name: Gather assets and validate manifests
         run: |
-          mkdir assets
-          find downloaded -type f -exec cp -n '{}' assets/ \;
           python scripts/release-manifests.py --tag "$RELEASE_TAG" --assets assets --output manifests
           cp manifests/Casks/rustboard.rb assets/
           tar -czf assets/package-manifests.tar.gz -C manifests .
@@ -138,7 +130,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      actions: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -161,5 +152,3 @@ jobs:
           branch="release-manifests/$RELEASE_TAG"
           git push origin "HEAD:refs/heads/$branch"
           gh pr create --base main --head "$branch" --title "Update packages to $RELEASE_TAG" --body "Update Homebrew and Scoop manifests for $RELEASE_TAG."
-          # GITHUB_TOKEN-created pull requests do not trigger pull_request workflows.
-          gh workflow run ci.yml --ref "$branch"

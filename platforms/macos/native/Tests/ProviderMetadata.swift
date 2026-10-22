@@ -1,7 +1,7 @@
 import Foundation
 import FileProvider
-@main struct ProviderMetadataTest {
-    static func main() throws {
+enum ProviderMetadataTest {
+    static func run() throws {
         let files = (0..<10000).map {FileEntry(file_id: UUID().uuidString, relative_path: "file-\($0).bin", size: 1, version: "v1", media_type: "application/octet-stream")}
         let offer = Offer(protocol: 1, source_device: UUID().uuidString, offer_id: UUID().uuidString, event_sequence: 1, expires_unix_ms: UInt64(Date().timeIntervalSince1970 * 1000) + 600000, content: Content(kind: "files", files: files, text: nil))
         try offer.validate()

@@ -31,8 +31,9 @@ try:
   assert len(peers(i))==1
   assert json.loads((profiles[i][2]/'clock.json').read_text())['clock']==156
   active=json.loads(run(i,'status','--json').stdout);assert active['peers']==[] and active['pending_restart']
- # Address-based unpair, unknown address rejected.
- assert run(0,'unpair','127.0.0.1').returncode==0
+ # Unpair persists before restart, which is unavailable for isolated profiles.
+ removed=run(0,'unpair','127.0.0.1')
+ assert removed.returncode!=0 and 'service commands target installed default profile only' in removed.stderr
  assert not peers(0)
  assert run(0,'unpair','127.0.0.1').returncode!=0
  time.sleep(.7)

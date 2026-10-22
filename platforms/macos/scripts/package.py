@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package signed artifacts; never fabricate a release URL/checksum or notarization."""
+"""Package the signed macOS app, binaries and installation scripts."""
 import argparse,hashlib,subprocess,tarfile,tomllib
 args=argparse.ArgumentParser()
 args.add_argument("--release-url", help="HTTPS URL of this exact archive after upload")
@@ -15,7 +15,9 @@ if 'TeamIdentifier=not set' in info or 'TeamIdentifier=' not in info:raise Syste
 arch=subprocess.check_output(['lipo','-archs',str(out/'bin/rustboardd')],text=True).strip()
 if arch not in ('arm64','x86_64'):raise SystemExit('Expected a single supported architecture')
 version=tomllib.loads((root/'Cargo.toml').read_text())['package']['version']
-archive=out/f'rustboard-{version}-macos-{arch}.tar.gz'
+assets=root/'target/release-assets'
+assets.mkdir(parents=True,exist_ok=True)
+archive=assets/f'rustboard-{version}-macos-{arch}.tar.gz'
 def executable_scripts(info):
     if info.name.endswith('.sh'):info.mode=0o755
     return info

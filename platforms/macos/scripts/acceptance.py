@@ -73,7 +73,6 @@ else:
     expected=str(base/'bin/rustboardd')+' --listen 127.0.0.1:45441'
     actual=subprocess.check_output(['/bin/ps','-p',str(pid),'-o','command='],text=True).strip()
     if actual!=expected:raise RuntimeError('Recorded PID is not the isolated acceptance Agent; refusing stop')
-    subprocess.run([str(cli),'unpair','127.0.0.1:45442'],env=env,check=True)
     os.kill(pid,signal.SIGTERM);write_command('stop')
     subprocess.run([str(host),'remove'],env=env,check=True)
     print('Stopped acceptance profile and removed only its domain; retained evidence and identity.')

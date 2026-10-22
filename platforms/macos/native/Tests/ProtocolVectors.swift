@@ -1,12 +1,22 @@
 import Foundation
 import CryptoKit
 
-@main struct ProtocolVectors {
-    static func main() throws {
+enum ProtocolVectors {
+    static func run() throws {
         let vector = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
-        struct Vectors: Decodable {let offer: Offer; let data: DataMessage; let invalid_paths: [String]; let valid_paths: [String]}
+        struct Vectors: Decodable {let offer: Offer; let contents: [Content]; let data: DataMessage; let invalid_paths: [String]; let valid_paths: [String]}
         let v = try JSONDecoder().decode(Vectors.self, from: vector)
         try v.offer.validate(now: 999999)
+        precondition(v.offer.cut)
+        for content in v.contents {
+            let offer = Offer(protocol: 1, source_device: v.offer.source_device, offer_id: v.offer.offer_id,
+                              event_sequence: v.offer.event_sequence, expires_unix_ms: v.offer.expires_unix_ms, content: content)
+            try offer.validate(now: 999999)
+            let decoded = try JSONDecoder().decode(Offer.self, from: JSONEncoder().encode(offer))
+            precondition(decoded.content.kind == content.kind && decoded.content.text == content.text
+                         && decoded.content.html == content.html && decoded.content.rtf == content.rtf
+                         && decoded.content.image == content.image)
+        }
         precondition(v.offer.content.files![1].relative_path == "folder/样例.bin")
         precondition(v.data.offset == 249 && v.data.bytes == [249,250,0,1,2])
         precondition(v.valid_paths.allSatisfy {validPath($0)})

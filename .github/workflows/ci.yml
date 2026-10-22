@@ -2,34 +2,38 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - LICENSE
+      - Casks/**
+      - bucket/**
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, ubuntu-24.04, macos-15, macos-15-intel]
+        os: [windows-2022, ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:
-          toolchain: 1.99.1
-          components: rustfmt, clippy
+          persist-credentials: false
+      - name: Set up Rust
+        run: rustup show
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ${{ matrix.os }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-0 libdbus-1-dev pkg-config
-      - run: cargo fmt --all -- --check
-      - run: cargo test --all-targets --locked
-      - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: python scripts/check-vectors.py
-      - if: runner.os != 'Windows'
-        run: python scripts/test-purge.py
-      - if: runner.os == 'Windows'
-        run: ./platforms/windows/scripts/test-uninstall.ps1
-      - if: runner.os == 'macOS'
-        run: bash platforms/macos/scripts/test.sh
+      - name: Check
+        run: python scripts/check.py

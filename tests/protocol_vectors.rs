@@ -9,6 +9,19 @@ fn shared_mac_linux_windows_vectors() {
         serde_json::from_str(include_str!("protocol/vectors.json")).unwrap();
     let offer: Offer = serde_json::from_value(vectors["offer"].clone()).unwrap();
     offer.validate(1).unwrap();
+    assert!(offer.cut);
+    for content in vectors["contents"].as_array().unwrap() {
+        let rich_offer = Offer {
+            cut: false,
+            content: serde_json::from_value(content.clone()).unwrap(),
+            ..offer.clone()
+        };
+        rich_offer.validate(1).unwrap();
+        let mut frame = Vec::new();
+        write_frame(&mut frame, &rich_offer).unwrap();
+        let decoded: Offer = read_frame(&mut &frame[..]).unwrap();
+        assert_eq!(decoded, rich_offer);
+    }
     let _: Message = serde_json::from_value(vectors["read"].clone()).unwrap();
     let _: IpcRequest = serde_json::from_value(vectors["ipc"].clone()).unwrap();
     let data: Message = serde_json::from_value(vectors["data"].clone()).unwrap();

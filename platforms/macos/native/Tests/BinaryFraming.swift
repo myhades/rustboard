@@ -1,6 +1,6 @@
 import Foundation
-@main struct BinaryFraming {
-    static func main() throws {
+enum BinaryFraming {
+    static func run() throws {
         func readPacket(_ data: Data, binary: Bool) throws -> Reply {
             var position = 0
             return try readIPCReply(binary: binary) { count in

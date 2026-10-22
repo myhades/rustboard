@@ -31,8 +31,29 @@
         }
       ]
     },
-    "cut": false
+    "cut": true
   },
+  "contents": [
+    {
+      "kind": "text",
+      "text": "Hello 世界",
+      "html": "<b>Hello 世界</b>",
+      "rtf": "e1xydGYxIEhlbGxvfQ=="
+    },
+    {
+      "kind": "image",
+      "image": {
+        "file_id": "00000000-0000-0000-0000-000000000004",
+        "relative_path": "image.png",
+        "size": 1047,
+        "version": "image-content",
+        "media_type": "image/png",
+        "directory": false,
+        "modified_ms": null,
+        "executable": null
+      }
+    }
+  ],
   "read": {
     "type": "read",
     "background": false,

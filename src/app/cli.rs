@@ -137,8 +137,6 @@ fn help(command: Option<&str>) -> Result<()> {
     let Some(command) = command else {
         println!(
             "\
-Synchronize the clipboard between paired computers.
-
 Usage: rustboard <COMMAND> [ARGUMENTS]
 
 Commands:

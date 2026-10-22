@@ -3,7 +3,7 @@ use crate::core::*;
 use crate::test_pattern::PatternSource;
 use anyhow::{Result, ensure};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, Weak},
     time::{SystemTime, UNIX_EPOCH},
@@ -26,6 +26,11 @@ struct FileBatch {
     sources: HashMap<String, Arc<dyn ReadAt>>,
     entries: HashMap<String, usize>,
     readers: Weak<()>,
+    roots: Vec<PathBuf>,
+    sent: HashMap<String, HashMap<usize, u64>>,
+    received: HashSet<String>,
+    moved: HashSet<String>,
+    move_finished: bool,
 }
 pub struct Engine {
     pub device_id: String,
@@ -155,6 +160,11 @@ impl Engine {
                         .map(|(index, f)| (f.file_id.clone(), index))
                         .collect(),
                     readers: Weak::new(),
+                    roots: Vec::new(),
+                    sent: HashMap::new(),
+                    received: HashSet::new(),
+                    moved: HashSet::new(),
+                    move_finished: false,
                 },
             );
         }
@@ -230,8 +240,26 @@ impl Engine {
     }
     pub fn local(
         &mut self,
+        content: Content,
+        sources: HashMap<String, Arc<dyn ReadAt>>,
+    ) -> Result<Offer> {
+        self.local_content(content, sources, Vec::new(), false)
+    }
+    pub fn local_files(
+        &mut self,
+        files: Vec<FileEntry>,
+        sources: HashMap<String, Arc<dyn ReadAt>>,
+        roots: Vec<PathBuf>,
+        cut: bool,
+    ) -> Result<Offer> {
+        self.local_content(Content::Files { files }, sources, roots, cut)
+    }
+    fn local_content(
+        &mut self,
         mut content: Content,
         sources: HashMap<String, Arc<dyn ReadAt>>,
+        roots: Vec<PathBuf>,
+        cut: bool,
     ) -> Result<Offer> {
         ensure!(
             !self.text_only || matches!(content, Content::Text { .. }),
@@ -248,6 +276,7 @@ impl Engine {
             .checked_add(1)
             .ok_or_else(|| anyhow::anyhow!("clock exhausted"))?;
         let offer = Offer {
+            cut,
             protocol: PROTOCOL_VERSION,
             source_device: self.device_id.clone(),
             offer_id: new_id(),
@@ -257,6 +286,9 @@ impl Engine {
         };
         offer.validate(now_ms())?;
         self.register_batch(&offer, sources)?;
+        if let Some(batch) = self.batches.get_mut(&offer.offer_id) {
+            batch.roots = roots;
+        }
         self.watermark = Some((
             offer.event_sequence,
             offer.source_device.clone(),
@@ -266,6 +298,93 @@ impl Engine {
         self.current = Some(offer.clone());
         self.expire();
         Ok(offer)
+    }
+    // Track delivered ranges per peer; reads by different peers cannot complete a move together.
+    pub fn sent(&mut self, offer: &str, peer: &str, file: &str, offset: u64, length: u64) {
+        let Some(batch) = self.batches.get_mut(offer) else {
+            return;
+        };
+        if batch.roots.is_empty() {
+            return;
+        }
+        let Some(&index) = batch.entries.get(file) else {
+            return;
+        };
+        if batch.sent.len() >= 16 && !batch.sent.contains_key(peer) {
+            return;
+        }
+        let prefix = batch
+            .sent
+            .entry(peer.into())
+            .or_default()
+            .entry(index)
+            .or_default();
+        if offset <= *prefix {
+            *prefix = (*prefix).max(offset.saturating_add(length));
+        }
+    }
+    pub fn take_recycle_roots(&mut self, offer: &str, peer: &str) -> Result<Vec<PathBuf>> {
+        self.expire();
+        let batch = self
+            .batches
+            .get_mut(offer)
+            .ok_or_else(|| anyhow::anyhow!("file offer expired"))?;
+        ensure!(
+            batch.offer.source_device == self.device_id,
+            "source is not local"
+        );
+        let Content::Files { files } = &batch.offer.content else {
+            anyhow::bail!("not files")
+        };
+        ensure!(
+            files.iter().enumerate().all(|(i, f)| f.directory
+                || f.size.is_some_and(|size| {
+                    batch
+                        .sent
+                        .get(peer)
+                        .and_then(|sent| sent.get(&i))
+                        .copied()
+                        .unwrap_or(0)
+                        >= size
+                })),
+            "batch transfer incomplete"
+        );
+        Ok(std::mem::take(&mut batch.roots))
+    }
+    // A download receipt is only enough for source-initiated cuts. A native move
+    // must acknowledge every selected root, including empty directories.
+    pub fn received(&mut self, offer: &str, file: &str, moving: bool) -> Result<bool> {
+        let batch = self
+            .batches
+            .get_mut(offer)
+            .ok_or_else(|| anyhow::anyhow!("file offer expired"))?;
+        let Content::Files { files } = &batch.offer.content else {
+            anyhow::bail!("not files")
+        };
+        let index = *batch
+            .entries
+            .get(file)
+            .ok_or_else(|| anyhow::anyhow!("file not found"))?;
+        if moving {
+            batch.moved.insert(file.into());
+        } else if !files[index].directory {
+            batch.received.insert(file.into());
+        }
+        let moved = files
+            .iter()
+            .filter(|f| !f.relative_path.contains('/'))
+            .all(|f| batch.moved.contains(&f.file_id));
+        let downloaded = batch.offer.cut
+            && files.iter().any(|f| !f.directory)
+            && files
+                .iter()
+                .filter(|f| !f.directory)
+                .all(|f| batch.received.contains(&f.file_id));
+        if batch.move_finished || !(moved || downloaded) {
+            return Ok(false);
+        }
+        batch.move_finished = true;
+        Ok(true)
     }
     pub fn accept(&mut self, mut offer: Offer, authenticated_device: &str) -> Result<bool> {
         offer.validate(now_ms())?;
@@ -337,6 +456,80 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recycling_requires_one_peer_to_receive_the_entire_batch_once() {
+        let mut engine = Engine::new(new_id());
+        let mut offer = batch(&mut engine);
+        let Content::Files { files } = &mut offer.content else {
+            unreachable!()
+        };
+        let first = files[0].file_id.clone();
+        let second = files[1].file_id.clone();
+        let roots = vec![PathBuf::from("first"), PathBuf::from("second")];
+        engine.batches.get_mut(&offer.offer_id).unwrap().roots = roots.clone();
+        assert!(engine.take_recycle_roots(&offer.offer_id, "a").is_err());
+        engine.sent(&offer.offer_id, "a", &first, 0, 4);
+        engine.sent(&offer.offer_id, "b", &second, 0, 4);
+        assert!(engine.take_recycle_roots(&offer.offer_id, "a").is_err());
+        engine.sent(&offer.offer_id, "a", &second, 2, 2);
+        assert!(engine.take_recycle_roots(&offer.offer_id, "a").is_err());
+        engine.sent(&offer.offer_id, "a", &second, 0, 4);
+        assert_eq!(
+            engine.take_recycle_roots(&offer.offer_id, "a").unwrap(),
+            roots
+        );
+        assert!(
+            engine
+                .take_recycle_roots(&offer.offer_id, "a")
+                .unwrap()
+                .is_empty()
+        );
+    }
+    #[test]
+    fn move_receipts_wait_for_every_root_and_cut_downloads_for_every_file() {
+        let mut engine = Engine::new(new_id());
+        let offer = batch(&mut engine);
+        let files = offer.content.entries();
+        assert!(
+            !engine
+                .received(&offer.offer_id, &files[0].file_id, false)
+                .unwrap()
+        );
+        assert!(
+            !engine
+                .received(&offer.offer_id, &files[1].file_id, false)
+                .unwrap()
+        );
+        assert!(
+            !engine
+                .received(&offer.offer_id, &files[0].file_id, true)
+                .unwrap()
+        );
+        assert!(
+            engine
+                .received(&offer.offer_id, &files[1].file_id, true)
+                .unwrap()
+        );
+        assert!(
+            !engine
+                .received(&offer.offer_id, &files[1].file_id, true)
+                .unwrap()
+        );
+        let offer = batch(&mut engine);
+        let files = offer.content.entries();
+        engine.batches.get_mut(&offer.offer_id).unwrap().offer.cut = true;
+        assert!(
+            !engine
+                .received(&offer.offer_id, &files[0].file_id, false)
+                .unwrap()
+        );
+        assert!(engine.received(&offer.offer_id, "unknown", false).is_err());
+        assert!(
+            engine
+                .received(&offer.offer_id, &files[1].file_id, false)
+                .unwrap()
+        );
+    }
     fn batch(engine: &mut Engine) -> Offer {
         let files: Vec<_> = (0..2)
             .map(|_| FileEntry {

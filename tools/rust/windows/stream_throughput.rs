@@ -73,12 +73,16 @@ fn main() -> anyhow::Result<()> {
             offer.offer_id.clone(),
             file,
         ));
-        let object = create(vec![PresentedFile {
-            directory: false,
-            modified_ms: None,
-            name: "pattern.bin".into(),
-            source: remote,
-        }])?;
+        let object = create(
+            vec![PresentedFile {
+                directory: false,
+                modified_ms: None,
+                name: "pattern.bin".into(),
+                source: remote,
+            }],
+            None,
+            false,
+        )?;
         let stream = unsafe {
             let mut descriptor = object.GetData(&format(
                 RegisterClipboardFormatW(w!("FileGroupDescriptorW")) as u16,

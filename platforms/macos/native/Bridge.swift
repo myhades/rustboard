@@ -4,6 +4,14 @@ import IOKit.pwr_mgt
 
 private var observed = -1
 private var owned = -1
+@_cdecl("rb_trash") public func rbTrash(_ path: UnsafePointer<CChar>) -> Int32 {
+    autoreleasepool {
+        do {
+            try FileManager.default.trashItem(at: URL(fileURLWithPath: String(cString: path)), resultingItemURL: nil)
+            return 0
+        } catch {return -1}
+    }
+}
 @_cdecl("rb_init") public func rbInit() {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.prohibited)

@@ -36,7 +36,7 @@ final class Item: NSObject, NSFileProviderItem {
     var contentType: UTType {isDirectory ? .folder : (UTType(filenameExtension: (filename as NSString).pathExtension) ?? .data)}
     // Finder propagates uchg for read-only capabilities and fails repeated copy.
     // This is an export namespace: content write-back remains unsupported below.
-    var capabilities: NSFileProviderItemCapabilities {[.allowsReading, .allowsWriting]}
+    var capabilities: NSFileProviderItemCapabilities {file == nil ? [.allowsReading, .allowsWriting] : [.allowsReading, .allowsWriting, .allowsDeleting]}
     var fileSystemFlags: NSFileProviderFileSystemFlags {isDirectory || file?.executable == true ? [.userReadable,.userWritable,.userExecutable] : [.userReadable,.userWritable]}
     var contentPolicy: NSFileProviderContentPolicy {.downloadLazily}
     var documentSize: NSNumber? {file?.size.map {NSNumber(value:$0)}}
@@ -166,6 +166,9 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 guard !progress.isCancelled else {try? FileManager.default.removeItem(at:url);throw WireError.cancelled}
                 log.debug("fetch_complete bytes=\(size)")
                 completionHandler(url,item,nil)
+                if offer.cut && !request.isSystemRequest {
+                    _ = try? session.call(Operation(type: "file_received", offer_id: offer.offer_id, file_id: file.file_id))
+                }
             } catch {
                 // Log only the stage and typed error code, never paths or file content.
                 let ns = error as NSError
@@ -182,5 +185,14 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     }
     func createItem(basedOn itemTemplate:NSFileProviderItem,fields:NSFileProviderItemFields,contents url:URL?,options:NSFileProviderCreateItemOptions,request:NSFileProviderRequest,completionHandler:@escaping(NSFileProviderItem?,NSFileProviderItemFields,Bool,Error?)->Void)->Progress {completionHandler(nil,[],false,CocoaError(.featureUnsupported));return Progress()}
     func modifyItem(_ item:NSFileProviderItem,baseVersion version:NSFileProviderItemVersion,changedFields:NSFileProviderItemFields,contents newContents:URL?,options:NSFileProviderModifyItemOptions,request:NSFileProviderRequest,completionHandler:@escaping(NSFileProviderItem?,NSFileProviderItemFields,Bool,Error?)->Void)->Progress {completionHandler(nil,[],false,CocoaError(.featureUnsupported));return Progress()}
-    func deleteItem(identifier:NSFileProviderItemIdentifier,baseVersion version:NSFileProviderItemVersion,options:NSFileProviderDeleteItemOptions,request:NSFileProviderRequest,completionHandler:@escaping(Error?)->Void)->Progress {completionHandler(CocoaError(.featureUnsupported));return Progress()}
+    func deleteItem(identifier:NSFileProviderItemIdentifier,baseVersion version:NSFileProviderItemVersion,options:NSFileProviderDeleteItemOptions,request:NSFileProviderRequest,completionHandler:@escaping(Error?)->Void)->Progress {
+        let progress = Progress()
+        DispatchQueue.global().async {
+            if let item = try? lookup(identifier, profile: self.profile), let offer = item.offer, let file = item.file, item.itemVersion == version {
+                _ = try? ipc(Operation(type: "move_item", offer_id: offer.offer_id, file_id: file.file_id), profile: self.profile)
+            }
+            completionHandler(nil)
+        }
+        return progress
+    }
 }

@@ -18,6 +18,36 @@ pub(super) struct ReadConnection {
 pub(super) type SharedConnection = Arc<Mutex<ReadConnection>>;
 
 impl Node {
+    pub fn recycle_remote(&self, id: &str) -> Result<()> {
+        let device = self.engine.lock().unwrap().batch_device(id)?;
+        let peer = self
+            .peers
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|p| p.device() == device)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("source peer unavailable"))?;
+        let mut stream = connect(&self.identity, &peer)?;
+        write_frame(
+            &mut stream,
+            &Message::Recycle {
+                offer_id: id.into(),
+            },
+        )?;
+        ensure!(
+            matches!(read_frame::<_, Message>(&mut stream)?, Message::Ack),
+            "move not completed"
+        );
+        Ok(())
+    }
+    pub fn finish_item(&self, id: &str, file: &str, moving: bool) -> Result<()> {
+        let complete = self.engine.lock().unwrap().received(id, file, moving)?;
+        if complete {
+            self.recycle_remote(id)?;
+        }
+        Ok(())
+    }
     pub(crate) fn begin_batch(&self, id: &str) -> Result<BatchRead> {
         let (device, token) = {
             let mut engine = self.engine.lock().unwrap();

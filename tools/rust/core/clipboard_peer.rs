@@ -35,6 +35,14 @@ fn main() -> anyhow::Result<()> {
     while Instant::now() < deadline {
         let command = std::fs::read_to_string(out.join("command.txt")).unwrap_or_default();
         if command != mode {
+            if command.trim() == "recycle" {
+                let offer: Offer =
+                    serde_json::from_slice(&std::fs::read(out.join("received.json"))?)?;
+                node.recycle_remote(&offer.offer_id)?;
+                std::fs::write(out.join("recycled.txt"), &offer.offer_id)?;
+                mode = command;
+                continue;
+            }
             let mut engine = node.engine.lock().unwrap();
             match command.trim() {
                 "text" => {
@@ -68,7 +76,7 @@ fn main() -> anyhow::Result<()> {
                         [(id, source as Arc<dyn ReadAt>)].into(),
                     )?;
                 }
-                "directory" => {
+                "directory" | "cut-directory" => {
                     let mut files = Vec::new();
                     let mut map: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
                     sources.clear();
@@ -95,7 +103,12 @@ fn main() -> anyhow::Result<()> {
                             sources.push(source);
                         }
                     }
-                    engine.local(Content::Files { files }, map)?;
+                    engine.local_files(
+                        files,
+                        map,
+                        Vec::new(),
+                        command.trim() == "cut-directory",
+                    )?;
                 }
                 "files" => {
                     let mut files = Vec::new();

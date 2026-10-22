@@ -69,6 +69,17 @@ try:
     wait(copy_source)
     offer=wait(lambda:(o if (o:=read(peerout/'received.json'))['content']['kind']=='files' else None))
     received=peerout/('received-'+next(f['file_id'] for f in offer['content']['files'] if f['relative_path']==local.name));wait(received.exists);assert received.read_bytes()==local.read_bytes();assert any(f['directory'] and f['relative_path']=='folder/empty' for f in offer['content']['files']);entry=next(f for f in offer['content']['files'] if f['relative_path']=='folder/run');received=peerout/('received-'+entry['file_id']);wait(received.exists);assert received.read_bytes()==script.read_bytes() and entry['executable'];print('PASS Thunar Ctrl+C folder and file capture',flush=True)
+    subprocess.run(['xdotool','key','--clearmodifiers','ctrl+x'],env=env,check=True)
+    cut=wait(lambda:(o if (o:=read(peerout/'received.json')).get('cut') else None))
+    for entry in cut['content']['files']:
+        if not entry['directory']:wait((peerout/('received-'+entry['file_id'])).exists)
+    assert local.exists() and script.exists()
+    command.write_text('recycle');wait(lambda:(peerout/'recycled.txt').exists())
+    wait(lambda:not local.exists() and not script.exists())
+    trash=pathlib.Path(os.environ['XDG_DATA_HOME'])/'Trash/files'
+    assert (trash/local.name).read_bytes()==bytes(range(256))*16
+    assert (trash/'folder/run').read_bytes()==b'#!/bin/sh\nexit 0\n' and (trash/'folder/empty').is_dir()
+    print('PASS Thunar Ctrl+X, whole-batch completion and recoverable source trash',flush=True)
     subprocess.run(['xdotool','windowclose',source_window],env=env,check=True)
     # Native image bytes retain their representation.
     import gi
@@ -104,6 +115,14 @@ try:
     assert int((out/'copied-tree/nested/run').stat().st_mtime)==1700000000
     assert (out/'copied-tree/nested/run').stat().st_mode & 0o100
     print('PASS lazy directory copy, empty directory and file attributes',flush=True)
+    command.write_text('cut-directory')
+    uris=wait(lambda:(r.stdout.decode().strip().splitlines()[1:] if (r:=get('x-special/gnome-copied-files')).stdout.startswith(b'cut\n') else None))
+    tree=pathlib.Path(__import__('urllib.parse',fromlist=['unquote']).unquote(uris[0].removeprefix('file://')))
+    moved=out/'moved-tree'
+    subprocess.run(['mv',str(tree),str(moved)],env=env,check=True)
+    assert not tree.exists() and (moved/'empty').is_dir()
+    assert (moved/'nested/run').read_bytes()==bytes(i%251 for i in range(4096))
+    print('PASS remote cut marker and FUSE directory move',flush=True)
     command.write_text('files');wait(lambda:read(peerout/'published.json')['content']['kind']=='files')
     (peerout/'text.txt').write_text('z'*200000);command.write_text('text');wait(lambda:get('UTF8_STRING').stdout==b'z'*200000);print('PASS INCR publication',flush=True)
     command.write_text('files');wait(lambda:get('text/uri-list').returncode==0)
@@ -122,7 +141,7 @@ try:
     a=start();assert read(config)['identity']==identity;a.kill();a.wait();a=start();assert read(config)['identity']==identity
     print('PASS keyring restart and stale mount recovery',flush=True)
     a.terminate();a.wait(timeout=10)
-    result=dict(passed=True,zero_preread=True,replacement=True,text=True,incr_capture=True,incr_publication=True,native_image=True,files=True,thunar_paste=True,keyring=True,crash_cleanup=True)
+    result=dict(passed=True,zero_preread=True,replacement=True,text=True,incr_capture=True,incr_publication=True,native_image=True,files=True,thunar_paste=True,cut=True,recycle=True,fuse_move=True,keyring=True,crash_cleanup=True)
     report=root/'test-output/linux';report.mkdir(parents=True,exist_ok=True);(report/'desktop.json').write_text(json.dumps(result,indent=2))
 finally:
     for p in reversed(procs):

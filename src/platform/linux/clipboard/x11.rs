@@ -21,7 +21,7 @@ use x11rb::{
 x11rb::atom_manager! {
     pub Atoms: AtomsCookie {
         CLIPBOARD, TARGETS, UTF8_STRING, INCR, RUSTBOARD_DATA,
-        URI: b"text/uri-list", COPIED: b"x-special/gnome-copied-files",
+        CUT: b"application/x-kde-cutselection", URI: b"text/uri-list", COPIED: b"x-special/gnome-copied-files",
         TEXT: b"text/plain;charset=utf-8", PLAIN: b"text/plain",
         PNG: b"image/png", JPEG: b"image/jpeg",
         HTML: b"text/html", RTF: b"text/rtf", APP_RTF: b"application/rtf",
@@ -112,7 +112,9 @@ impl Clipboard {
         Ok(())
     }
     fn capture(&self, target: Atom, bytes: Vec<u8>) -> Result<Captured> {
-        let mime = if target == self.atoms.PNG {
+        let mime = if target == self.atoms.CUT {
+            "application/x-kde-cutselection"
+        } else if target == self.atoms.PNG {
             "image/png"
         } else if target == self.atoms.JPEG {
             "image/jpeg"
@@ -185,6 +187,7 @@ impl Clipboard {
         if p.target == self.atoms.TARGETS {
             let targets: Vec<_> = value.value32().into_iter().flatten().collect();
             let mapping = [
+                (self.atoms.CUT, "application/x-kde-cutselection"),
                 (self.atoms.URI, "text/uri-list"),
                 (self.atoms.COPIED, "x-special/gnome-copied-files"),
                 (self.atoms.PNG, "image/png"),
@@ -407,16 +410,23 @@ impl Clipboard {
             .collect::<Result<_>>()?;
         self.claim()
     }
-    pub fn publish_files(&mut self, paths: &[PathBuf]) -> Result<()> {
+    pub fn publish_files(&mut self, paths: &[PathBuf], cut: bool) -> Result<()> {
         let uris: Vec<_> = paths.iter().map(|p| uri(p)).collect();
         self.formats = vec![
+            (
+                self.atoms.CUT,
+                Arc::new(if cut { b"1".to_vec() } else { b"0".to_vec() }),
+            ),
             (
                 self.atoms.URI,
                 Arc::new(format!("{}\r\n", uris.join("\r\n")).into_bytes()),
             ),
             (
                 self.atoms.COPIED,
-                Arc::new(format!("copy\n{}", uris.join("\n")).into_bytes()),
+                Arc::new(
+                    format!("{}\n{}", if cut { "cut" } else { "copy" }, uris.join("\n"))
+                        .into_bytes(),
+                ),
             ),
         ];
         self.claim()

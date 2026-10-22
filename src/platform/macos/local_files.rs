@@ -1,4 +1,6 @@
-use crate::core::{Content, LocalFile, Offer, ReadAt, engine::Engine};
+#[cfg(test)]
+use crate::core::Content;
+use crate::core::{LocalFile, Offer, ReadAt, engine::Engine};
 use anyhow::{Result, ensure};
 use std::{
     collections::HashMap,
@@ -36,6 +38,7 @@ impl ReadAt for Snapshot {
     }
 }
 pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, dir: &Path) -> Result<Offer> {
+    let roots = paths.clone();
     let mut files = Vec::new();
     let mut sources: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
     for (path, mut entry) in crate::core::files::manifest(paths)? {
@@ -93,7 +96,20 @@ pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, dir: &Path) -> Result<Off
         files.push(entry);
         sources.insert(id, source);
     }
-    engine.local(Content::Files { files }, sources)
+    engine.local_files(files, sources, roots, false)
+}
+pub(crate) fn recycle(paths: &[PathBuf]) -> bool {
+    unsafe extern "C" {
+        fn rb_trash(path: *const libc::c_char) -> i32;
+    }
+    let mut ok = true;
+    for path in paths {
+        let result = CString::new(path.as_os_str().as_bytes())
+            .ok()
+            .is_some_and(|path| unsafe { rb_trash(path.as_ptr()) == 0 });
+        ok &= result;
+    }
+    ok
 }
 #[cfg(test)]
 mod tests {

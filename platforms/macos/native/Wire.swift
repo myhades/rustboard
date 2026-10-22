@@ -15,6 +15,7 @@ struct FileEntry: Codable, Equatable {
 }
 struct Content: Codable { let kind: String; let files: [FileEntry]?; let text: String?; var html: String? = nil; var rtf: String? = nil; var image: FileEntry? = nil }
 struct Offer: Codable {
+    var cut: Bool = false
     let `protocol`: UInt16
     let source_device: String
     let offer_id: String
@@ -22,6 +23,7 @@ struct Offer: Codable {
     let expires_unix_ms: UInt64
     let content: Content
     func validate(now: UInt64 = UInt64(Date().timeIntervalSince1970 * 1000)) throws {
+        guard !cut || content.kind == "files" else {throw WireError.invalid}
         guard `protocol` == 1, UUID(uuidString: source_device) != nil, UUID(uuidString: offer_id) != nil,
               expires_unix_ms > now, expires_unix_ms - now <= 86400000 else { throw WireError.stale }
         if content.kind == "text" {
@@ -261,8 +263,9 @@ extension Content {
 }
 extension Offer {
     init(from decoder:Decoder) throws {
-        try checkKeys(decoder,["protocol","source_device","offer_id","event_sequence","expires_unix_ms","content"])
+        try checkKeys(decoder,["cut","protocol","source_device","offer_id","event_sequence","expires_unix_ms","content"])
         let c=try decoder.container(keyedBy:CodingKeys.self)
+        cut=try c.decode(Bool.self,forKey:.cut)
         `protocol`=try c.decode(UInt16.self,forKey:.protocol);source_device=try c.decode(String.self,forKey:.source_device)
         offer_id=try c.decode(String.self,forKey:.offer_id);event_sequence=try c.decode(UInt64.self,forKey:.event_sequence)
         expires_unix_ms=try c.decode(UInt64.self,forKey:.expires_unix_ms);content=try c.decode(Content.self,forKey:.content)

@@ -1,4 +1,6 @@
-use crate::core::{Content, ReadAt, engine::Engine};
+#[cfg(test)]
+use crate::core::Content;
+use crate::core::{ReadAt, engine::Engine};
 use anyhow::{Result, ensure};
 use std::{
     collections::HashMap,
@@ -135,7 +137,8 @@ impl ReadAt for FilePath {
         self.open_reader()?.unwrap().read_at(offset, buffer)
     }
 }
-pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>) -> Result<()> {
+pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, cut: bool) -> Result<()> {
+    let roots = paths.clone();
     let mut files = Vec::new();
     let mut sources: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
     for (path, mut entry) in crate::core::files::manifest(paths)? {
@@ -156,7 +159,7 @@ pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>) -> Result<()> {
         }
         files.push(entry);
     }
-    engine.local(Content::Files { files }, sources)?;
+    engine.local_files(files, sources, roots, cut)?;
     Ok(())
 }
 /// Path and NTFS change time detect rename/move/write without denying user access.
@@ -211,7 +214,7 @@ mod tests {
             fingerprint: b.identity.pin(),
         });
         b.peers.lock().unwrap().push(peer.clone());
-        offer(&mut a.engine.lock().unwrap(), vec![path.clone()]).unwrap();
+        offer(&mut a.engine.lock().unwrap(), vec![path.clone()], false).unwrap();
         let manifest = a.engine.lock().unwrap().current.clone().unwrap();
         let Content::Files { files } = &manifest.content else {
             panic!()
@@ -262,7 +265,7 @@ mod tests {
             fingerprint: b.identity.pin(),
         });
         b.peers.lock().unwrap().push(peer.clone());
-        offer(&mut a.engine.lock().unwrap(), vec![path.clone()]).unwrap();
+        offer(&mut a.engine.lock().unwrap(), vec![path.clone()], false).unwrap();
         let manifest = a.engine.lock().unwrap().current.clone().unwrap();
         let Content::Files { files } = &manifest.content else {
             panic!()

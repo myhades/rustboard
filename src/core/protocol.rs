@@ -26,6 +26,14 @@ pub enum IpcOperation {
         offer_id: String,
     },
     GetFileOffers,
+    FileReceived {
+        offer_id: String,
+        file_id: String,
+    },
+    MoveItem {
+        offer_id: String,
+        file_id: String,
+    },
     Retain {
         offer_id: String,
     },
@@ -92,6 +100,7 @@ impl Content {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Offer {
+    pub cut: bool,
     pub protocol: u16,
     pub source_device: String,
     pub offer_id: String,
@@ -134,6 +143,10 @@ pub fn validate_path(path: &str) -> Result<()> {
 
 impl Offer {
     pub fn validate(&self, now: u64) -> Result<()> {
+        ensure!(
+            !self.cut || matches!(self.content, Content::Files { .. }),
+            "invalid cut offer"
+        );
         ensure!(self.protocol == PROTOCOL_VERSION, "unsupported protocol");
         uuid::Uuid::parse_str(&self.source_device)?;
         uuid::Uuid::parse_str(&self.offer_id)?;
@@ -228,6 +241,9 @@ impl Offer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Message {
+    Recycle {
+        offer_id: String,
+    },
     Retain {
         offer_id: String,
     },
@@ -308,6 +324,7 @@ mod tests {
     use super::*;
     fn offer(content: Content) -> Offer {
         Offer {
+            cut: false,
             protocol: PROTOCOL_VERSION,
             source_device: super::super::engine::new_id(),
             offer_id: super::super::engine::new_id(),

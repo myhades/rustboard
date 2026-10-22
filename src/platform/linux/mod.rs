@@ -1,6 +1,6 @@
 mod clipboard;
 pub(crate) mod credential;
-mod files;
+pub(crate) mod files;
 pub mod ipc;
 pub(crate) mod service;
 
@@ -56,7 +56,6 @@ pub fn run() -> Result<()> {
         files::Files::new(node.clone()),
         &mount,
         &[
-            fuser::MountOption::RO,
             fuser::MountOption::NoDev,
             fuser::MountOption::NoSuid,
             fuser::MountOption::NoExec,
@@ -87,7 +86,7 @@ pub fn run() -> Result<()> {
                             (clipboard::Captured::Text(value), content @ Content::Text { .. }) => {
                                 value == content
                             }
-                            (clipboard::Captured::Files(paths), Content::Files { files }) => {
+                            (clipboard::Captured::Files(paths, _), Content::Files { files }) => {
                                 paths.len()
                                     == files
                                         .iter()
@@ -119,8 +118,8 @@ pub fn run() -> Result<()> {
                     clipboard::Captured::Text(text) => {
                         engine.local(text, Default::default()).map(|_| ())
                     }
-                    clipboard::Captured::Files(paths) if !engine.text_only => {
-                        files::offer(&mut engine, paths, &mount)
+                    clipboard::Captured::Files(paths, cut) if !engine.text_only => {
+                        files::offer(&mut engine, paths, &mount, cut)
                     }
                     clipboard::Captured::Image(bytes, extension) if !engine.text_only => {
                         let path = images.join(format!(
@@ -179,6 +178,7 @@ pub fn run() -> Result<()> {
                         .filter(|f| !f.relative_path.contains('/'))
                         .map(|f| mount.join(&offer.offer_id).join(&f.relative_path))
                         .collect::<Vec<_>>(),
+                    offer.cut,
                 )?,
             }
             presented = Some(offer.offer_id);

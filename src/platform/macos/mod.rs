@@ -342,7 +342,7 @@ pub fn run() -> Result<()> {
                     } else {
                         presented = Some(offer.offer_id.clone());
                         log::debug!(target: "clipboard", "native file publication complete");
-                        if eager_download {
+                        if eager_download && !offer.cut {
                             pending = None;
                             let host = std::env::var_os("RUSTBOARD_HOST")
                                 .ok_or_else(|| anyhow::anyhow!("RUSTBOARD_HOST required"))?;

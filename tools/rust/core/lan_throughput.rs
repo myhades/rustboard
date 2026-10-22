@@ -210,12 +210,16 @@ fn receive_com(remote: RemoteSource, output: &Path) -> Result<()> {
     }
     let _guard = Guard;
     let size = remote.len();
-    let object = create(vec![PresentedFile {
-        directory: false,
-        modified_ms: None,
-        name: "pattern.bin".into(),
-        source: Arc::new(remote),
-    }])?;
+    let object = create(
+        vec![PresentedFile {
+            directory: false,
+            modified_ms: None,
+            name: "pattern.bin".into(),
+            source: Arc::new(remote),
+        }],
+        None,
+        false,
+    )?;
     let stream = unsafe {
         let mut medium = object.GetData(&format(
             RegisterClipboardFormatW(w!("FileContents")) as u16,

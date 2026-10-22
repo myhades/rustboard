@@ -213,8 +213,17 @@ struct VirtualFiles {
     contents: u16,
     effect: u16,
     origin: u16,
+    performed: u16,
+    pasted: u16,
+    cut: bool,
+    move_batch: Option<(Arc<crate::core::transport::Node>, String)>,
+    moved: std::sync::atomic::AtomicBool,
 }
-pub fn create(files: Vec<PresentedFile>) -> anyhow::Result<IDataObject> {
+pub fn create(
+    files: Vec<PresentedFile>,
+    move_batch: Option<(Arc<crate::core::transport::Node>, String)>,
+    cut: bool,
+) -> anyhow::Result<IDataObject> {
     anyhow::ensure!(
         !files.is_empty() && files.len() <= crate::core::MAX_FILES,
         "invalid file count"
@@ -235,6 +244,11 @@ pub fn create(files: Vec<PresentedFile>) -> anyhow::Result<IDataObject> {
             contents: RegisterClipboardFormatW(w!("FileContents")) as u16,
             effect: RegisterClipboardFormatW(w!("Preferred DropEffect")) as u16,
             origin: RegisterClipboardFormatW(w!("Rustboard.Origin.v1")) as u16,
+            performed: RegisterClipboardFormatW(w!("Performed DropEffect")) as u16,
+            pasted: RegisterClipboardFormatW(w!("Paste Succeeded")) as u16,
+            cut,
+            move_batch,
+            moved: std::sync::atomic::AtomicBool::new(false),
         }
         .into())
     }
@@ -371,7 +385,7 @@ impl IDataObject_Impl for VirtualFiles_Impl {
             }
             bytes
         } else if f.cfFormat == self.effect {
-            1u32.to_le_bytes().to_vec()
+            (if self.cut { 2u32 } else { 1u32 }).to_le_bytes().to_vec()
         } else {
             b"rustboard-v1\0".to_vec()
         };
@@ -401,8 +415,52 @@ impl IDataObject_Impl for VirtualFiles_Impl {
         }
         E_NOTIMPL
     }
-    fn SetData(&self, _: *const FORMATETC, _: *const STGMEDIUM, _: BOOL) -> Result<()> {
-        Err(E_NOTIMPL.into())
+    fn SetData(
+        &self,
+        format: *const FORMATETC,
+        medium: *const STGMEDIUM,
+        release: BOOL,
+    ) -> Result<()> {
+        if format.is_null() || medium.is_null() {
+            return Err(E_POINTER.into());
+        }
+        let (format, medium) = unsafe { (&*format, &*medium) };
+        if ![self.performed, self.pasted].contains(&format.cfFormat)
+            || medium.tymed != TYMED_HGLOBAL.0 as u32
+        {
+            return Err(DV_E_FORMATETC.into());
+        }
+        let effect = unsafe {
+            let memory = medium.u.hGlobal;
+            if GlobalSize(memory) < 4 {
+                return Err(DV_E_FORMATETC.into());
+            }
+            let pointer = GlobalLock(memory);
+            if pointer.is_null() {
+                return Err(E_FAIL.into());
+            }
+            let value = std::ptr::read_unaligned(pointer.cast::<u32>());
+            let _ = GlobalUnlock(memory);
+            value
+        };
+        if effect == 2
+            && let Some((node, id)) = &self.move_batch
+            && !self.moved.swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            let (node, id) = (node.clone(), id.clone());
+            let sources: Vec<_> = self.files.iter().map(|f| f.source.clone()).collect();
+            std::thread::spawn(move || {
+                let _ = node.recycle_remote(&id);
+                drop(sources);
+            });
+        }
+        if release.as_bool() {
+            unsafe {
+                let mut owned = std::ptr::read(medium);
+                windows::Win32::System::Ole::ReleaseStgMedium(&mut owned);
+            }
+        }
+        Ok(())
     }
     fn EnumFormatEtc(&self, direction: u32) -> Result<IEnumFORMATETC> {
         if direction != DATADIR_GET.0 as u32 {
@@ -426,38 +484,142 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
     #[test]
+    fn shell_move_finishes_the_batch_before_recycling_sources() {
+        use crate::core::transport::{Identity, Node, Peer, RemoteSource};
+        use windows::Win32::System::Ole::*;
+        use windows::core::PCWSTR;
+        let root = std::env::temp_dir().join(crate::core::engine::new_id());
+        let tree = root.join("source-tree");
+        let extra = root.join("source-note.txt");
+        let destination = root.join("destination");
+        std::fs::create_dir_all(tree.join("empty")).unwrap();
+        std::fs::create_dir(&destination).unwrap();
+        std::fs::write(tree.join("file.txt"), b"nested file").unwrap();
+        std::fs::write(&extra, b"second root").unwrap();
+        let source = Node::new(Identity::generate().unwrap(), vec![]);
+        let target = Node::new(Identity::generate().unwrap(), vec![]);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let peer = Peer {
+            address: listener.local_addr().unwrap(),
+            fingerprint: source.identity.pin(),
+        };
+        source.peers.lock().unwrap().push(Peer {
+            address: "127.0.0.1:1".parse().unwrap(),
+            fingerprint: target.identity.pin(),
+        });
+        target.peers.lock().unwrap().push(peer.clone());
+        super::super::local_files::offer(
+            &mut source.engine.lock().unwrap(),
+            vec![tree.clone(), extra.clone()],
+            true,
+        )
+        .unwrap();
+        let offer = source.engine.lock().unwrap().current.clone().unwrap();
+        let server = source.serve(listener).unwrap();
+        target.sync_once(&peer).unwrap();
+        let sources = RemoteSource::batch(target.clone(), peer, offer.clone());
+        let object = create(
+            offer
+                .content
+                .entries()
+                .iter()
+                .zip(sources)
+                .map(|(file, source)| PresentedFile {
+                    name: file.relative_path.clone(),
+                    directory: file.directory,
+                    modified_ms: file.modified_ms,
+                    source,
+                })
+                .collect(),
+            Some((target.clone(), offer.offer_id.clone())),
+            true,
+        )
+        .unwrap();
+        assert!(target.recycle_remote(&offer.offer_id).is_err());
+        assert!(tree.exists() && extra.exists());
+        unsafe {
+            OleInitialize(None).unwrap();
+            let path: Vec<_> = destination
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
+            let item: IShellItem =
+                SHCreateItemFromParsingName(PCWSTR(path.as_ptr()), None).unwrap();
+            let drop_target: IDropTarget = item.BindToHandler(None, &BHID_SFUIObject).unwrap();
+            let mut effect = DROPEFFECT_MOVE;
+            drop_target
+                .DragEnter(&object, Default::default(), POINTL::default(), &mut effect)
+                .unwrap();
+            drop_target
+                .Drop(&object, Default::default(), POINTL::default(), &mut effect)
+                .unwrap();
+            assert_eq!(effect, DROPEFFECT_MOVE);
+            drop(drop_target);
+            drop(item);
+            drop(object);
+            OleUninitialize();
+        }
+        for _ in 0..300 {
+            if !tree.exists() && !extra.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(destination.join("source-tree/empty").is_dir());
+        assert_eq!(
+            std::fs::read(destination.join("source-tree/file.txt")).unwrap(),
+            b"nested file"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("source-note.txt")).unwrap(),
+            b"second root"
+        );
+        assert!(
+            !tree.exists() && !extra.exists(),
+            "Shell did not complete the move"
+        );
+        source.stop.store(true, Ordering::Release);
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn shell_copies_nested_and_empty_virtual_directories() {
         use windows::Win32::System::Ole::*;
         use windows::core::PCWSTR;
         let root = std::env::temp_dir().join(crate::core::engine::new_id());
         std::fs::create_dir(&root).unwrap();
         let source = Arc::new(PatternSource::new(31));
-        let object = create(vec![
-            PresentedFile {
-                name: "tree".into(),
-                directory: true,
-                modified_ms: None,
-                source: source.clone(),
-            },
-            PresentedFile {
-                name: "tree/empty".into(),
-                directory: true,
-                modified_ms: None,
-                source: source.clone(),
-            },
-            PresentedFile {
-                name: "tree/nested".into(),
-                directory: true,
-                modified_ms: None,
-                source: source.clone(),
-            },
-            PresentedFile {
-                name: "tree/nested/文件.bin".into(),
-                directory: false,
-                modified_ms: Some(1700000000000),
-                source: source.clone(),
-            },
-        ])
+        let object = create(
+            vec![
+                PresentedFile {
+                    name: "tree".into(),
+                    directory: true,
+                    modified_ms: None,
+                    source: source.clone(),
+                },
+                PresentedFile {
+                    name: "tree/empty".into(),
+                    directory: true,
+                    modified_ms: None,
+                    source: source.clone(),
+                },
+                PresentedFile {
+                    name: "tree/nested".into(),
+                    directory: true,
+                    modified_ms: None,
+                    source: source.clone(),
+                },
+                PresentedFile {
+                    name: "tree/nested/文件.bin".into(),
+                    directory: false,
+                    modified_ms: Some(1700000000000),
+                    source: source.clone(),
+                },
+            ],
+            None,
+            false,
+        )
         .unwrap();
         assert_eq!(
             source.bytes_read.load(std::sync::atomic::Ordering::Relaxed),
@@ -567,6 +729,8 @@ mod tests {
                     )),
                 })
                 .collect(),
+            None,
+            false,
         )
         .unwrap();
         assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
@@ -662,12 +826,16 @@ mod tests {
     #[test]
     fn descriptor_does_not_read_content_and_validates_index() {
         let source = Arc::new(crate::test_pattern::PatternSource::new(1 << 30));
-        let object = create(vec![PresentedFile {
-            directory: false,
-            modified_ms: None,
-            name: "test.bin".into(),
-            source: source.clone(),
-        }])
+        let object = create(
+            vec![PresentedFile {
+                directory: false,
+                modified_ms: None,
+                name: "test.bin".into(),
+                source: source.clone(),
+            }],
+            None,
+            false,
+        )
         .unwrap();
         unsafe {
             let mut medium = object

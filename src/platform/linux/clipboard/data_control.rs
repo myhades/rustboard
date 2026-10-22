@@ -178,16 +178,23 @@ impl Clipboard {
         }
         self.flush()
     }
-    pub fn publish_files(&mut self, paths: &[PathBuf]) -> Result<()> {
+    pub fn publish_files(&mut self, paths: &[PathBuf], cut: bool) -> Result<()> {
         let uris: Vec<_> = paths.iter().map(|p| super::uri(p)).collect();
         self.publish_formats(HashMap::from([
+            (
+                "application/x-kde-cutselection".into(),
+                Arc::new(if cut { b"1".to_vec() } else { b"0".to_vec() }),
+            ),
             (
                 "text/uri-list".into(),
                 Arc::new(format!("{}\r\n", uris.join("\r\n")).into_bytes()),
             ),
             (
                 "x-special/gnome-copied-files".into(),
-                Arc::new(format!("copy\n{}", uris.join("\n")).into_bytes()),
+                Arc::new(
+                    format!("{}\n{}", if cut { "cut" } else { "copy" }, uris.join("\n"))
+                        .into_bytes(),
+                ),
             ),
         ]))
     }

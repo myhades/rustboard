@@ -81,7 +81,7 @@ case "prefetch":
     do {
         guard let offer = try currentOffer(), offer.offer_id == CommandLine.arguments.dropFirst(2).first,
               let files = offer.content.files, let manager = NSFileProviderManager(for: domain) else {throw WireError.stale}
-        guard eagerEligible(files) else {finish(nil);break}
+        guard !offer.cut, eagerEligible(files) else {finish(nil);break}
         let group = DispatchGroup(), lock = NSLock(); var failed = false
         for file in files where !file.directory {
             group.enter()

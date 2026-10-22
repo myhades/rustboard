@@ -8,3 +8,4 @@ pub(crate) mod credential;
 pub(crate) mod service;
 
 mod html;
+pub(crate) mod recycle;

@@ -201,6 +201,24 @@ impl Node {
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("unpaired"))?;
             let response = match message {
+                Message::Recycle { offer_id } => {
+                    let paths = self
+                        .engine
+                        .lock()
+                        .unwrap()
+                        .take_recycle_roots(&offer_id, &peer.device())?;
+                    if !paths.is_empty() && crate::platform::recycle(&paths) {
+                        let mut engine = self.engine.lock().unwrap();
+                        if engine
+                            .current
+                            .as_ref()
+                            .is_some_and(|o| o.offer_id == offer_id)
+                        {
+                            engine.clear_clipboard();
+                        }
+                    }
+                    Message::Ack
+                }
                 Message::Hello {
                     protocol,
                     device_id,
@@ -334,6 +352,13 @@ impl Node {
                             if eof {
                                 transfer = None;
                             }
+                            self.engine.lock().unwrap().sent(
+                                &offer_id,
+                                &peer.device(),
+                                &file_id,
+                                offset,
+                                length as u64,
+                            );
                             continue;
                         }
                         _ => Message::Error {

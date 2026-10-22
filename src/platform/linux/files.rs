@@ -43,7 +43,8 @@ impl ReadAt for FilePath {
         self.open_reader()?.unwrap().read_at(offset, buffer)
     }
 }
-pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, mount: &Path) -> Result<()> {
+pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, mount: &Path, cut: bool) -> Result<()> {
+    let roots = paths.clone();
     use std::os::unix::fs::MetadataExt;
     let mut files = Vec::new();
     let mut sources: HashMap<String, Arc<dyn ReadAt>> = HashMap::new();
@@ -64,8 +65,41 @@ pub fn offer(engine: &mut Engine, paths: Vec<PathBuf>, mount: &Path) -> Result<(
         }
         files.push(entry);
     }
-    engine.local(Content::Files { files }, sources)?;
+    engine.local_files(files, sources, roots, cut)?;
     Ok(())
+}
+
+pub(crate) fn recycle(paths: &[PathBuf]) -> bool {
+    use std::{
+        ffi::{CString, c_void},
+        os::unix::ffi::OsStrExt,
+    };
+    #[link(name = "libgio-2.0.so.0", kind = "dylib", modifiers = "+verbatim")]
+    unsafe extern "C" {
+        fn g_file_new_for_path(path: *const std::ffi::c_char) -> *mut c_void;
+        fn g_file_trash(file: *mut c_void, cancel: *mut c_void, error: *mut *mut c_void) -> i32;
+    }
+    #[link(name = "libgobject-2.0.so.0", kind = "dylib", modifiers = "+verbatim")]
+    unsafe extern "C" {
+        fn g_object_unref(object: *mut c_void);
+    }
+    let mut ok = true;
+    for path in paths {
+        let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
+            ok = false;
+            continue;
+        };
+        unsafe {
+            let file = g_file_new_for_path(path.as_ptr());
+            if file.is_null() {
+                ok = false;
+                continue;
+            }
+            ok &= g_file_trash(file, std::ptr::null_mut(), std::ptr::null_mut()) != 0;
+            g_object_unref(file);
+        }
+    }
+    ok
 }
 
 struct Entry {
@@ -87,6 +121,32 @@ pub struct Files {
     next: u64,
 }
 impl Files {
+    fn remove_export(
+        &mut self,
+        parent: u64,
+        name: &OsStr,
+        directory: bool,
+    ) -> std::result::Result<(), i32> {
+        let name = name.to_str().ok_or(libc::EINVAL)?;
+        let ino = *self
+            .children
+            .get(&parent)
+            .and_then(|c| c.get(name))
+            .ok_or(libc::ENOENT)?;
+        let entry = self.entries.get(&ino).ok_or(libc::ENOENT)?;
+        let file = entry.file.as_ref().ok_or(libc::EPERM)?;
+        if file.directory != directory {
+            return Err(libc::EINVAL);
+        }
+        if directory && self.children.get(&ino).is_some_and(|c| !c.is_empty()) {
+            return Err(libc::ENOTEMPTY);
+        }
+        let _ = self.node.finish_item(&entry.batch, &file.file_id, true);
+        self.entries.remove(&ino);
+        self.children.remove(&ino);
+        self.children.get_mut(&parent).unwrap().remove(name);
+        Ok(())
+    }
     pub fn new(node: Arc<Node>) -> Self {
         Self {
             node,
@@ -206,6 +266,18 @@ impl Files {
     }
 }
 impl Filesystem for Files {
+    fn unlink(&mut self, _: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        match self.remove_export(parent, name, false) {
+            Ok(()) => reply.ok(),
+            Err(e) => reply.error(e),
+        }
+    }
+    fn rmdir(&mut self, _: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        match self.remove_export(parent, name, true) {
+            Ok(()) => reply.ok(),
+            Err(e) => reply.error(e),
+        }
+    }
     fn lookup(&mut self, _: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
         self.sync();
         if let Some(ino) = name

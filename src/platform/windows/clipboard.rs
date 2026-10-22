@@ -29,8 +29,13 @@ thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
 
 pub struct WindowsBackend;
 impl WindowsBackend {
-    fn publish_files(&mut self, files: Vec<PresentedFile>) -> anyhow::Result<()> {
-        let object = virtual_files::create(files)?;
+    fn publish_files(
+        &mut self,
+        files: Vec<PresentedFile>,
+        node: Arc<crate::core::transport::Node>,
+        offer: &crate::core::Offer,
+    ) -> anyhow::Result<()> {
+        let object = virtual_files::create(files, Some((node, offer.offer_id.clone())), offer.cut)?;
         unsafe {
             OleSetClipboard(&object)?;
         }
@@ -169,7 +174,7 @@ fn read_bytes(format: u32, limit: usize) -> anyhow::Result<Option<Vec<u8>>> {
 /// Captured paths are local only. Never serialize them onto the wire.
 pub enum Captured {
     Text(crate::core::Content),
-    Files(Vec<PathBuf>),
+    Files(Vec<PathBuf>, bool),
     Image(super::image_file::Image),
     Unsupported,
 }
@@ -191,7 +196,11 @@ pub fn capture(window: HWND) -> anyhow::Result<Captured> {
                     &buffer[..length as usize],
                 )?));
             }
-            return Ok(Captured::Files(paths));
+            let effect = read_bytes(RegisterClipboardFormatW(w!("Preferred DropEffect")), 64)?;
+            let cut = effect
+                .as_deref()
+                .is_some_and(|b| b.get(..4) == Some(2u32.to_le_bytes().as_slice()));
+            return Ok(Captured::Files(paths, cut));
         }
         use base64::Engine;
         let limit = crate::core::MAX_TEXT;
@@ -274,11 +283,11 @@ fn update(window: HWND) {
                         }
                     });
                 }
-                Captured::Files(paths) => {
+                Captured::Files(paths, cut) => {
                     STATE.with_borrow(|s| {
                         if let Some(node) = &s.node {
                             let mut engine = node.engine.lock().unwrap();
-                            if super::local_files::offer(&mut engine, paths.clone()).is_err() {
+                            if super::local_files::offer(&mut engine, paths.clone(), cut).is_err() {
                                 engine.clear_clipboard();
                                 log::warn!(target: "clipboard", "clipboard file offer rejected");
                             }
@@ -528,7 +537,7 @@ fn tick(window: HWND) {
                             source,
                         })
                         .collect();
-                    backend.publish_files(files)?;
+                    backend.publish_files(files, node.clone(), &offer)?;
                     STATE.with_borrow_mut(|s| {
                         s.remote_offer = Some(offer.offer_id.clone());
                     });

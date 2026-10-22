@@ -52,6 +52,14 @@ impl Node {
         retained: Option<SharedBatchRead>,
     ) -> Result<IpcReply> {
         match operation {
+            IpcOperation::FileReceived { offer_id, file_id } => {
+                let _ = self.finish_item(&offer_id, &file_id, false);
+                Ok(IpcReply::Other(serde_json::json!({"ok":true,"protocol":1})))
+            }
+            IpcOperation::MoveItem { offer_id, file_id } => {
+                let _ = self.finish_item(&offer_id, &file_id, true);
+                Ok(IpcReply::Other(serde_json::json!({"ok":true,"protocol":1})))
+            }
             IpcOperation::GetOffer => {
                 let mut engine = self.engine.lock().unwrap();
                 engine.expire();

@@ -6,22 +6,9 @@ mod x11;
 use anyhow::{Result, ensure};
 use std::path::{Path, PathBuf};
 
-const MIMES: [&str; 10] = [
-    "text/uri-list",
-    "x-special/gnome-copied-files",
-    "text/html",
-    "text/rtf",
-    "application/rtf",
-    "image/png",
-    "image/jpeg",
-    "text/plain;charset=utf-8",
-    "UTF8_STRING",
-    "text/plain",
-];
-
 pub enum Captured {
     Text(crate::core::Content),
-    Files(Vec<PathBuf>),
+    Files(Vec<PathBuf>, bool),
     Image(Vec<u8>, &'static str),
     Unsupported,
 }
@@ -88,11 +75,11 @@ impl Clipboard {
             Self::DataControl(c) => c.publish_formats(formats),
         }
     }
-    pub fn publish_files(&mut self, paths: &[PathBuf]) -> Result<()> {
+    pub fn publish_files(&mut self, paths: &[PathBuf], cut: bool) -> Result<()> {
         match self {
-            Self::X11(c) => c.publish_files(paths),
-            Self::Gnome(c) => c.publish_files(paths),
-            Self::DataControl(c) => c.publish_files(paths),
+            Self::X11(c) => c.publish_files(paths, cut),
+            Self::Gnome(c) => c.publish_files(paths, cut),
+            Self::DataControl(c) => c.publish_files(paths, cut),
         }
     }
     pub fn clear_owned(&mut self) -> Result<()> {
@@ -106,8 +93,13 @@ impl Clipboard {
 
 fn capture_types(types: &[&str]) -> Vec<&'static str> {
     let first = |names: &[&'static str]| names.iter().copied().find(|m| types.contains(m));
-    if let Some(mime) = first(&MIMES[..2]) {
+    if let Some(mime) = first(&["x-special/gnome-copied-files"]) {
         return vec![mime];
+    }
+    if let Some(mime) = first(&["text/uri-list"]) {
+        return std::iter::once(mime)
+            .chain(first(&["application/x-kde-cutselection"]))
+            .collect();
     }
     let html = first(&["text/html"]);
     let rtf = first(&["text/rtf", "application/rtf"]);
@@ -124,6 +116,15 @@ fn capture_types(types: &[&str]) -> Vec<&'static str> {
         .collect()
 }
 fn merge(captured: &mut Option<Captured>, value: Captured) {
+    if let (Some(Captured::Files(paths, cut)), Captured::Files(other, moving)) =
+        (&mut *captured, &value)
+    {
+        if !other.is_empty() {
+            *paths = other.clone();
+        }
+        *cut |= moving;
+        return;
+    }
     if let (
         Some(Captured::Text(crate::core::Content::Text { text, html, rtf })),
         Captured::Text(crate::core::Content::Text {
@@ -167,6 +168,9 @@ fn capture(mime: &str, bytes: Vec<u8>) -> Result<Captured> {
         }));
     }
     let text = String::from_utf8(bytes)?;
+    if mime == "application/x-kde-cutselection" {
+        return Ok(Captured::Files(Vec::new(), text.trim() == "1"));
+    }
     if mime == "text/html" {
         ensure!(
             text.len() <= crate::core::MAX_TEXT && !text.contains('\0'),
@@ -185,7 +189,10 @@ fn capture(mime: &str, bytes: Vec<u8>) -> Result<Captured> {
             .map(parse_uri)
             .collect::<Result<Vec<_>>>()?;
         ensure!(paths.len() <= crate::core::MAX_FILES, "too many files");
-        return Ok(Captured::Files(paths));
+        return Ok(Captured::Files(
+            paths,
+            mime == "x-special/gnome-copied-files" && text.lines().next() == Some("cut"),
+        ));
     }
     ensure!(
         text.len() <= crate::core::MAX_TEXT && !text.contains('\0'),
@@ -238,6 +245,28 @@ fn parse_uri(value: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cut_markers_are_captured_with_their_file_list() {
+        assert_eq!(
+            capture_types(&["text/uri-list", "x-special/gnome-copied-files"]),
+            ["x-special/gnome-copied-files"]
+        );
+        let Captured::Files(paths, cut) = capture(
+            "x-special/gnome-copied-files",
+            b"cut\nfile:///tmp/test".to_vec(),
+        )
+        .unwrap() else {
+            panic!()
+        };
+        assert!(cut);
+        assert_eq!(paths, [PathBuf::from("/tmp/test")]);
+        let mut captured = Some(capture("text/uri-list", b"file:///tmp/test".to_vec()).unwrap());
+        merge(
+            &mut captured,
+            capture("application/x-kde-cutselection", b"1".to_vec()).unwrap(),
+        );
+        assert!(matches!(captured, Some(Captured::Files(paths, true)) if paths.len() == 1));
+    }
     #[test]
     fn representations_are_grouped_without_converting_content() {
         let types = capture_types(&["image/png", "text/html", "text/plain", "text/rtf"]);

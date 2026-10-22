@@ -12,7 +12,6 @@ use std::{
     collections::HashMap,
     fs::File,
     os::fd::FromRawFd,
-    path::PathBuf,
     sync::{Arc, atomic::Ordering},
     time::Duration,
 };
@@ -224,26 +223,6 @@ impl Clipboard {
         self.call::<_, ()>("SetSelection", (options,))?;
         self.formats = formats;
         Ok(())
-    }
-    pub fn publish_files(&mut self, paths: &[PathBuf], cut: bool) -> Result<()> {
-        let uris: Vec<_> = paths.iter().map(|p| super::uri(p)).collect();
-        self.publish_formats(HashMap::from([
-            (
-                "application/x-kde-cutselection".into(),
-                Arc::new(if cut { b"1".to_vec() } else { b"0".to_vec() }),
-            ),
-            (
-                "text/uri-list".into(),
-                Arc::new(format!("{}\r\n", uris.join("\r\n")).into_bytes()),
-            ),
-            (
-                "x-special/gnome-copied-files".into(),
-                Arc::new(
-                    format!("{}\n{}", if cut { "cut" } else { "copy" }, uris.join("\n"))
-                        .into_bytes(),
-                ),
-            ),
-        ]))
     }
     pub fn clear_owned(&mut self) -> Result<()> {
         // An empty options dictionary unsets only this session's source, never another application's.

@@ -1,8 +1,7 @@
-use super::{Captured, uri};
+use super::Captured;
 use anyhow::{Result, ensure};
 use std::{
     collections::HashMap,
-    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -408,27 +407,6 @@ impl Clipboard {
                 ))
             })
             .collect::<Result<_>>()?;
-        self.claim()
-    }
-    pub fn publish_files(&mut self, paths: &[PathBuf], cut: bool) -> Result<()> {
-        let uris: Vec<_> = paths.iter().map(|p| uri(p)).collect();
-        self.formats = vec![
-            (
-                self.atoms.CUT,
-                Arc::new(if cut { b"1".to_vec() } else { b"0".to_vec() }),
-            ),
-            (
-                self.atoms.URI,
-                Arc::new(format!("{}\r\n", uris.join("\r\n")).into_bytes()),
-            ),
-            (
-                self.atoms.COPIED,
-                Arc::new(
-                    format!("{}\n{}", if cut { "cut" } else { "copy" }, uris.join("\n"))
-                        .into_bytes(),
-                ),
-            ),
-        ];
         self.claim()
     }
     fn claim(&mut self) -> Result<()> {

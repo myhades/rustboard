@@ -4,7 +4,11 @@ mod pipe;
 mod x11;
 
 use anyhow::{Result, ensure};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 pub enum Captured {
     Text(crate::core::Content),
@@ -47,7 +51,6 @@ impl Clipboard {
         image: Option<Vec<u8>>,
     ) -> Result<()> {
         use base64::Engine;
-        use std::{collections::HashMap, sync::Arc};
         let mut formats = HashMap::new();
         match content {
             crate::core::Content::Text { text, html, rtf } => {
@@ -69,17 +72,33 @@ impl Clipboard {
             }
             _ => anyhow::bail!("not clipboard data"),
         }
+        self.publish_formats(formats)
+    }
+    pub fn publish_files(&mut self, paths: &[PathBuf], cut: bool) -> Result<()> {
+        let uris: Vec<_> = paths.iter().map(|p| uri(p)).collect();
+        self.publish_formats(HashMap::from([
+            (
+                "application/x-kde-cutselection".into(),
+                Arc::new(if cut { b"1".to_vec() } else { b"0".to_vec() }),
+            ),
+            (
+                "text/uri-list".into(),
+                Arc::new(format!("{}\r\n", uris.join("\r\n")).into_bytes()),
+            ),
+            (
+                "x-special/gnome-copied-files".into(),
+                Arc::new(
+                    format!("{}\n{}", if cut { "cut" } else { "copy" }, uris.join("\n"))
+                        .into_bytes(),
+                ),
+            ),
+        ]))
+    }
+    fn publish_formats(&mut self, formats: HashMap<String, Arc<Vec<u8>>>) -> Result<()> {
         match self {
             Self::X11(c) => c.publish_formats(formats),
             Self::Gnome(c) => c.publish_formats(formats),
             Self::DataControl(c) => c.publish_formats(formats),
-        }
-    }
-    pub fn publish_files(&mut self, paths: &[PathBuf], cut: bool) -> Result<()> {
-        match self {
-            Self::X11(c) => c.publish_files(paths, cut),
-            Self::Gnome(c) => c.publish_files(paths, cut),
-            Self::DataControl(c) => c.publish_files(paths, cut),
         }
     }
     pub fn clear_owned(&mut self) -> Result<()> {

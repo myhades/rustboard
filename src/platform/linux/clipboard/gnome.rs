@@ -177,7 +177,11 @@ impl Clipboard {
                     }
                 }
                 if self.receiving.is_empty() {
-                    captured = Some(Captured::Unsupported);
+                    captured = Some(if types.is_empty() {
+                        Captured::Cleared
+                    } else {
+                        Captured::Unsupported
+                    });
                 }
             }
         }

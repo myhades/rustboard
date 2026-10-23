@@ -114,7 +114,7 @@ impl Clipboard {
             self.receiving.clear();
             self.captured = None;
             let Some(offer) = &self.state.selection else {
-                return Ok(Some(Captured::Unsupported));
+                return Ok(Some(Captured::Cleared));
             };
             let types = &self.state.offers[offer];
             if types.contains(&self.state.marker) {
@@ -123,7 +123,11 @@ impl Clipboard {
             let types: Vec<_> = types.iter().map(String::as_str).collect();
             let mimes = super::capture_types(&types);
             if mimes.is_empty() {
-                return Ok(Some(Captured::Unsupported));
+                return Ok(Some(if types.is_empty() {
+                    Captured::Cleared
+                } else {
+                    Captured::Unsupported
+                }));
             }
             for mime in mimes {
                 let mut fds = [-1; 2];

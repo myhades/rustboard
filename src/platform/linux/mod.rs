@@ -115,6 +115,15 @@ pub fn run() -> Result<()> {
                     continue;
                 }
                 let result = match captured {
+                    // File managers can clear a cut selection before opening its files.
+                    clipboard::Captured::Cleared
+                        if engine.current.as_ref().is_some_and(|offer| {
+                            offer.source_device != engine.device_id
+                                && matches!(offer.content, Content::Files { .. })
+                        }) =>
+                    {
+                        Ok(())
+                    }
                     clipboard::Captured::Text(text) => {
                         engine.local(text, Default::default()).map(|_| ())
                     }

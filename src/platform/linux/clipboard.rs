@@ -14,6 +14,7 @@ pub enum Captured {
     Text(crate::core::Content),
     Files(Vec<PathBuf>, bool),
     Image(Vec<u8>, &'static str),
+    Cleared,
     Unsupported,
 }
 

@@ -150,6 +150,17 @@ try:
     assert int((out/'copied-tree/nested/run').stat().st_mtime)==1700000000
     assert (out/'copied-tree/nested/run').stat().st_mode & 0o100
     print('PASS lazy directory copy, empty directory and file attributes',flush=True)
+    subprocess.run(['wl-copy','--clear'],check=True)
+    wait(lambda:get('text/uri-list').returncode!=0)
+    # Cut paste can release the clipboard before opening the first directory.
+    time.sleep(.2)
+    shutil.copytree(tree,out/'after-clear')
+    assert (out/'after-clear/nested/run').read_bytes()==bytes(i%251 for i in range(4096))
+    assert get('text/uri-list').returncode!=0
+    publish('text/plain',b'new clipboard content')
+    wait(lambda:read(peerout/'received.json')['content'].get('text')=='new clipboard content')
+    wait(lambda:not tree.exists())
+    print('PASS cleared clipboard keeps received files until replacement without republishing',flush=True)
     if backend=='kwin':
         destination=out/'dolphin-destination';destination.mkdir();paste_action=dolphin_window(destination)
         command.write_text('files\n')

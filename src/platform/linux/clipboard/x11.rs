@@ -322,7 +322,7 @@ impl Clipboard {
                         if e.owner != NONE {
                             self.convert(e.owner, e.timestamp, self.atoms.TARGETS)?;
                         } else {
-                            captured = Some(Captured::Unsupported);
+                            captured = Some(Captured::Cleared);
                         }
                     }
                 }

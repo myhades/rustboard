@@ -77,6 +77,10 @@ pub fn run() -> Result<()> {
     let mut download = crate::app::image_file::Download::default();
     while !node.stop.load(Ordering::Acquire) && !STOP.load(Ordering::Relaxed) {
         match clipboard.poll() {
+            // A file manager may update a moved selection one URL at a time.
+            // Never walk our own FUSE mount while capturing clipboard files.
+            Ok(Some(clipboard::Captured::Files(paths, _)))
+                if paths.iter().any(|path| path.starts_with(&mount)) => {}
             Ok(Some(captured)) => {
                 let mut engine = node.engine.lock().unwrap();
                 // Clipboard managers may take ownership of the same remote content.
@@ -85,22 +89,6 @@ pub fn run() -> Result<()> {
                         && match (&captured, &offer.content) {
                             (clipboard::Captured::Text(value), content @ Content::Text { .. }) => {
                                 value == content
-                            }
-                            (clipboard::Captured::Files(paths, _), Content::Files { files }) => {
-                                paths.len()
-                                    == files
-                                        .iter()
-                                        .filter(|f| !f.relative_path.contains('/'))
-                                        .count()
-                                    && files.iter().filter(|f| !f.relative_path.contains('/')).all(
-                                        |file| {
-                                            paths.contains(
-                                                &mount
-                                                    .join(&offer.offer_id)
-                                                    .join(&file.relative_path),
-                                            )
-                                        },
-                                    )
                             }
                             (clipboard::Captured::Image(bytes, _), Content::Image { .. }) => {
                                 image_digest.as_ref().is_some_and(|(id, digest)| {

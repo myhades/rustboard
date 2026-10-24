@@ -112,6 +112,10 @@ try:
     paths=[pathlib.Path(unquote(urlsplit(u).path)) for u in uris]
     assert [p.stat().st_size for p in paths]==[4096,8192]
     assert read(peerout/'reads.json')==[0,0]
+    # Dolphin can replace a selection with only some of the exported URLs.
+    publish('text/uri-list',(paths[0].as_uri()+'\r\n').encode())
+    time.sleep(.2)
+    subprocess.run([str(cli),'status','--json'],capture_output=True,timeout=5,check=True)
     handles=[open(p,'rb',buffering=0) for p in paths];prefixes=[h.read(512) for h in handles]
     publish('text/plain',b'replacement during file reads')
     wait(lambda:read(peerout/'received.json')['content'].get('text')=='replacement during file reads')

@@ -48,7 +48,7 @@ fn main() -> anyhow::Result<()> {
     )?;
     let server = a.serve(listener, |_| false)?;
     let result = (|| -> anyhow::Result<()> {
-        b.sync_once(&peer)?;
+        b.accept(offer.clone(), peer.clone())?;
         anyhow::ensure!(
             source.bytes_read.load(Ordering::Relaxed) == 0,
             "unexpected pre-read"
@@ -119,7 +119,7 @@ fn main() -> anyhow::Result<()> {
         }
         Ok(())
     })();
-    a.stop.store(true, Ordering::Release);
+    a.shutdown();
     server
         .join()
         .map_err(|_| anyhow::anyhow!("server panicked"))?;

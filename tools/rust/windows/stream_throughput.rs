@@ -58,7 +58,7 @@ fn main() -> anyhow::Result<()> {
     )?;
     let server = a.serve(listener, |_| false)?;
     let result = (|| -> anyhow::Result<()> {
-        b.sync_once(&peer)?;
+        b.accept(offer.clone(), peer.clone())?;
         unsafe { OleInitialize(None)? };
         struct OleGuard;
         impl Drop for OleGuard {
@@ -141,7 +141,7 @@ fn main() -> anyhow::Result<()> {
         );
         Ok(())
     })();
-    a.stop.store(true, Ordering::Release);
+    a.shutdown();
     server
         .join()
         .map_err(|_| anyhow::anyhow!("server panicked"))?;

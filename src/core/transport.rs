@@ -27,7 +27,7 @@ use std::{
 const READ_WINDOW: usize = 4 * 1024 * 1024;
 
 type IpcSourceKey = (String, String, String, String, u64, bool);
-fn batch_keepalive(socket: &TcpStream) -> Result<()> {
+fn tcp_keepalive(socket: &TcpStream) -> Result<()> {
     socket2::SockRef::from(socket).set_tcp_keepalive(
         &socket2::TcpKeepalive::new()
             .with_time(Duration::from_secs(30))
@@ -45,7 +45,7 @@ pub struct Node {
     /// Only the latest accepted offer is queued: bounded even if clipboard STA is busy.
     pub incoming: Mutex<Option<(Offer, Peer)>>,
     active: AtomicUsize,
-    peer_connections: Mutex<std::collections::HashMap<SocketAddr, bool>>,
+    peer_connections: Mutex<std::collections::HashMap<SocketAddr, sync::PeerSync>>,
     // Bounded transport cache only: no file bytes, and every IPC read reauthorizes.
     ipc_connections: Mutex<Vec<(IpcSourceKey, SharedConnection)>>,
 }
@@ -101,7 +101,12 @@ impl Node {
                         }
                         let n = node.clone();
                         std::thread::spawn(move || {
-                            if let Err(e) = n.session(socket, recycle) {
+                            let result = n.session(socket, recycle);
+                            n.active.fetch_sub(1, Ordering::AcqRel);
+                            if let Ok(Some((peer, connection))) = &result {
+                                n.receive_control(peer, connection);
+                            }
+                            if let Err(e) = result {
                                 let closed = e
                                     .chain()
                                     .find_map(|cause| cause.downcast_ref::<std::io::Error>())
@@ -136,7 +141,6 @@ impl Node {
                                     }
                                 }
                             }
-                            n.active.fetch_sub(1, Ordering::AcqRel);
                         });
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -147,7 +151,11 @@ impl Node {
             }
         }))
     }
-    fn session(&self, socket: TcpStream, recycle: fn(&[PathBuf]) -> bool) -> Result<()> {
+    fn session(
+        self: &Arc<Self>,
+        socket: TcpStream,
+        recycle: fn(&[PathBuf]) -> bool,
+    ) -> Result<Option<(Peer, Arc<sync::Control>)>> {
         socket.set_nonblocking(false)?;
         socket.set_read_timeout(Some(Duration::from_secs(5)))?;
         socket.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -232,30 +240,21 @@ impl Node {
                         protocol == PROTOCOL_VERSION && device_id == peer.device(),
                         "identity or protocol mismatch"
                     );
-                    Message::Hello {
-                        protocol: PROTOCOL_VERSION,
-                        device_id: self.identity.device(),
-                    }
-                }
-                Message::Poll => {
-                    let mut engine = self.engine.lock().unwrap();
-                    engine.expire();
-                    engine
-                        .current
-                        .clone()
-                        .filter(|o| o.source_device == engine.device_id)
-                        .map(|offer| Message::Offer { offer })
-                        .unwrap_or(Message::Idle)
-                }
-                Message::Offer { offer } => {
-                    if self.accept(offer, peer).is_ok() {
-                        Message::Ack
-                    } else {
-                        Message::Error {
-                            request_id: None,
-                            code: ErrorCode::InvalidRequest,
-                        }
-                    }
+                    write_frame(
+                        &mut stream,
+                        &Message::Hello {
+                            protocol: PROTOCOL_VERSION,
+                            device_id: self.identity.device(),
+                        },
+                    )?;
+                    return Ok(self
+                        .control(
+                            &peer,
+                            rustls::Connection::Server(stream.conn),
+                            stream.sock,
+                            false,
+                        )?
+                        .map(|connection| (peer, connection)));
                 }
                 Message::Retain { offer_id } => {
                     let _retained = {
@@ -267,11 +266,11 @@ impl Node {
                         engine.retain_batch(&offer_id)?
                     };
                     write_frame(&mut stream, &Message::Ack)?;
-                    batch_keepalive(&stream.sock)?;
+                    tcp_keepalive(&stream.sock)?;
                     stream.sock.set_read_timeout(None)?;
                     // This channel carries ownership only; EOF releases the token.
                     let _: Message = read_frame(&mut stream)?;
-                    return Ok(());
+                    return Ok(None);
                 }
                 Message::Read {
                     background,
@@ -384,71 +383,11 @@ impl Node {
             };
             write_v2_response(&mut stream, &response)?;
         }
-        Ok(())
-    }
-    pub fn sync_once(&self, peer: &Peer) -> Result<()> {
-        ensure!(self.trusted(&peer.fingerprint), "unpaired");
-        let mut stream = connect(&self.identity, peer)?;
-        let offer = {
-            let mut e = self.engine.lock().unwrap();
-            e.expire();
-            e.current.clone().filter(|o| o.source_device == e.device_id)
-        };
-        if let Some(offer) = offer {
-            write_frame(&mut stream, &Message::Offer { offer })?;
-            let _: Message = read_frame(&mut stream)?;
-        }
-        write_frame(&mut stream, &Message::Poll)?;
-        if let Message::Offer { offer } = read_frame(&mut stream)? {
-            self.accept(offer, peer.clone())?;
-        }
-        Ok(())
-    }
-    pub fn peer_connection(&self, address: SocketAddr) -> Option<bool> {
-        self.peer_connections.lock().unwrap().get(&address).copied()
-    }
-    pub fn start_sync(self: &Arc<Self>) {
-        let node = self.clone();
-        std::thread::spawn(move || {
-            let mut failures = std::collections::HashMap::<SocketAddr, Instant>::new();
-            while !node.stop.load(Ordering::Acquire) {
-                let peers = node.peers.lock().unwrap().clone();
-                failures.retain(|address, _| peers.iter().any(|p| p.address == *address));
-                node.peer_connections
-                    .lock()
-                    .unwrap()
-                    .retain(|address, _| peers.iter().any(|p| p.address == *address));
-                for peer in peers {
-                    if node.stop.load(Ordering::Acquire) {
-                        break;
-                    }
-                    let result = node.sync_once(&peer);
-                    node.peer_connections
-                        .lock()
-                        .unwrap()
-                        .insert(peer.address, result.is_ok());
-                    match result {
-                        Ok(()) => {
-                            if failures.remove(&peer.address).is_some() {
-                                log::info!(target: "network", "peer {} reconnected", peer.address);
-                            }
-                        }
-                        Err(error) => {
-                            if failures
-                                .get(&peer.address)
-                                .is_none_or(|last| last.elapsed() >= Duration::from_secs(60))
-                            {
-                                log::warn!(target: "network", "peer {} sync failed: {}", peer.address, network_error(&error));
-                                failures.insert(peer.address, Instant::now());
-                            }
-                        }
-                    }
-                }
-                std::thread::sleep(Duration::from_secs(1));
-            }
-        });
+        Ok(None)
     }
 }
+
+mod sync;
 
 pub mod pairing;
 

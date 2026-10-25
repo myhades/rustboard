@@ -198,7 +198,15 @@ fn print_peers(peers: &Value) {
         for p in peers {
             let address = p["address"].as_str().unwrap_or("?");
             let status = p["status"].as_str().unwrap_or("unknown");
-            println!("  {address:width$}  {status}");
+            let detail = match status {
+                "error" => format!(" - {}", p["error"].as_str().unwrap_or("connection failed")),
+                "disconnected" => p["retry_in_seconds"]
+                    .as_u64()
+                    .map(|seconds| format!(" - retrying in {seconds}s"))
+                    .unwrap_or_default(),
+                _ => String::new(),
+            };
+            println!("  {address:width$}  {status}{detail}");
         }
     }
 }

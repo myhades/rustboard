@@ -255,7 +255,7 @@ mod tests {
                     [(id, source.clone() as Arc<dyn ReadAt>)].into(),
                 )
                 .unwrap();
-            b.sync_once(&peer).unwrap();
+            crate::test_network::sync(&a, &b);
             assert!(download.poll(&b).unwrap().is_none());
             let deadline = Instant::now() + Duration::from_secs(5);
             while !source.started.load(Ordering::Acquire) {
@@ -282,8 +282,8 @@ mod tests {
                 assert_eq!(result.unwrap().2.unwrap(), vec![42; 131072]);
             }
         }
-        a.stop.store(true, Ordering::Release);
-        b.stop.store(true, Ordering::Release);
+        a.shutdown();
+        b.shutdown();
         server.join().unwrap();
     }
     #[test]

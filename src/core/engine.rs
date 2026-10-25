@@ -5,7 +5,10 @@ use anyhow::{Result, ensure};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::{Arc, Weak},
+    sync::{
+        Arc, Weak,
+        mpsc::{SyncSender, TrySendError},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -21,6 +24,15 @@ pub fn new_id() -> String {
 
 // Bound concurrent active transfers, not idle clipboard history.
 const MAX_ACTIVE_BATCHES: usize = 8;
+
+#[derive(Debug)]
+pub(crate) struct CapacityExceeded(&'static str);
+impl std::fmt::Display for CapacityExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for CapacityExceeded {}
 struct FileBatch {
     offer: Offer,
     sources: HashMap<String, Arc<dyn ReadAt>>,
@@ -126,6 +138,7 @@ pub struct Engine {
     pub current: Option<Offer>,
     batches: HashMap<String, FileBatch>,
     pub accepted: u64,
+    pub(crate) changes: Vec<SyncSender<()>>,
 }
 impl Engine {
     pub fn new(device_id: String) -> Self {
@@ -138,6 +151,7 @@ impl Engine {
             current: None,
             batches: HashMap::new(),
             accepted: 0,
+            changes: Vec::new(),
         }
     }
     pub fn persist_clock(&mut self, path: PathBuf) -> Result<()> {
@@ -216,7 +230,7 @@ impl Engine {
                     .filter(|b| b.readers.strong_count() > 0)
                     .count()
                     < MAX_ACTIVE_BATCHES,
-                "file transfer capacity reached"
+                CapacityExceeded("file transfer capacity reached")
             );
             // Bound retained metadata as well as the number of stable-source handles.
             let size = serde_json::to_vec(offer)?.len();
@@ -230,7 +244,7 @@ impl Engine {
                 .sum();
             ensure!(
                 size + total <= MAX_FRAME - MAX_MANIFEST,
-                "file metadata capacity reached"
+                CapacityExceeded("file metadata capacity reached")
             );
             self.batches.insert(
                 offer.offer_id.clone(),
@@ -382,6 +396,8 @@ impl Engine {
         self.save_clock()?;
         self.current = Some(offer.clone());
         self.expire();
+        self.changes
+            .retain(|sender| !matches!(sender.try_send(()), Err(TrySendError::Disconnected(()))));
         Ok(offer)
     }
     pub fn sent(&mut self, offer: &str, peer: &str, file: &str, offset: u64, length: u64) {

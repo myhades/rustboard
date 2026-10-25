@@ -32,6 +32,7 @@ fn main() -> anyhow::Result<()> {
     let mut mode = String::new();
     let mut sources: Vec<Arc<pattern::PatternSource>> = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(1800);
+    node.start_sync();
     while Instant::now() < deadline {
         let command = std::fs::read_to_string(out.join("command.txt")).unwrap_or_default();
         if command != mode {
@@ -167,7 +168,6 @@ fn main() -> anyhow::Result<()> {
             )?;
             mode = command;
         }
-        let _ = node.sync_once(&peer);
         if let Some((offer, _)) = node.incoming.lock().unwrap().take() {
             std::fs::write(out.join("received.json"), serde_json::to_vec(&offer)?)?;
             if !offer.content.entries().is_empty() {
@@ -214,6 +214,6 @@ fn main() -> anyhow::Result<()> {
         )?;
         std::thread::sleep(Duration::from_millis(100));
     }
-    node.stop.store(true, Ordering::Release);
+    node.shutdown();
     Ok(())
 }

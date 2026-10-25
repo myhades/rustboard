@@ -456,7 +456,7 @@ pub fn run() -> anyhow::Result<()> {
     unsafe {
         let _ = RemoveClipboardFormatListener(window);
     }
-    node.stop.store(true, Ordering::Release);
+    node.shutdown();
     node.engine.lock().unwrap().withdraw();
     STATE.with_borrow_mut(|s| {
         s.remote_object = None;

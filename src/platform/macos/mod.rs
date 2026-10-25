@@ -144,7 +144,7 @@ extern "C" fn shutdown_signal(_: libc::c_int) {
 struct Cleanup(Arc<Node>);
 impl Drop for Cleanup {
     fn drop(&mut self) {
-        self.0.stop.store(true, Ordering::Release);
+        self.0.shutdown();
         self.0.engine.lock().unwrap().withdraw();
         unsafe {
             rb_clear_owned();

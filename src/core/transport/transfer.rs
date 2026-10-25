@@ -69,7 +69,7 @@ impl Node {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("source peer unavailable"))?;
         let mut stream = connect(&self.identity, &peer)?;
-        batch_keepalive(&stream.sock)?;
+        tcp_keepalive(&stream.sock)?;
         write_frame(
             &mut stream,
             &Message::Retain {

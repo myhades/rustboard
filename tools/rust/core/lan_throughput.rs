@@ -79,7 +79,7 @@ fn main() -> Result<()> {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        node.stop.store(true, Ordering::Release);
+        node.shutdown();
         server.join().unwrap();
         println!(
             "{}",
@@ -92,7 +92,12 @@ fn main() -> Result<()> {
         .conn
         .negotiated_cipher_suite()
         .map(|s| format!("{:?}", s.suite()));
-    node.sync_once(&peer)?;
+    node.start_sync();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while node.engine.lock().unwrap().current.is_none() {
+        anyhow::ensure!(std::time::Instant::now() < deadline, "no offer received");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let offer = node
         .engine
         .lock()

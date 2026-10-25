@@ -230,11 +230,19 @@ pub enum Message {
     Retain {
         offer_id: String,
     },
-    Poll,
-    Idle,
     Ack,
     Offer {
         offer: Offer,
+    },
+    OfferRejected {
+        offer_id: String,
+        code: ErrorCode,
+    },
+    Ping {
+        request_id: u64,
+    },
+    Pong {
+        request_id: u64,
     },
     Read {
         background: bool,

@@ -213,12 +213,10 @@ pub fn status(node: &crate::core::transport::Node, dir: &Path) -> Result<Value> 
         .unwrap()
         .iter()
         .map(|peer| {
-            let status = match node.peer_connection(peer.address) {
-                Some(true) => "connected",
-                Some(false) => "disconnected",
-                None => "connecting",
-            };
-            json!({"address":peer.address,"fingerprint":peer.fingerprint,"status":status})
+            let mut status = node.peer_status(peer.address);
+            status["address"] = json!(peer.address);
+            status["fingerprint"] = json!(peer.fingerprint);
+            status
         })
         .collect();
     Ok(

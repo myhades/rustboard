@@ -19,7 +19,12 @@ fn main() -> Result<()> {
     let peers: Vec<Peer> = serde_json::from_slice(&std::fs::read(dir.join("peers.json"))?)?;
     anyhow::ensure!(peers.len() == 1, "exactly one test peer required");
     let node = Node::new(test_identity::load(&dir)?, peers.clone());
-    node.sync_once(&peers[0])?;
+    node.start_sync();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while node.engine.lock().unwrap().current.is_none() {
+        anyhow::ensure!(std::time::Instant::now() < deadline, "no offer received");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let offer = node
         .engine
         .lock()

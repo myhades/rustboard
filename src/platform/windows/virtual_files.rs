@@ -604,7 +604,7 @@ mod tests {
                 super::super::recycle::recycle(paths).is_ok()
             })
             .unwrap();
-        target.sync_once(&peer).unwrap();
+        crate::test_network::sync(&source, &target);
         let sources = RemoteSource::batch(target.clone(), peer, offer.clone());
         let object = create(
             offer
@@ -667,7 +667,8 @@ mod tests {
             !tree.exists() && !extra.exists(),
             "Shell did not complete the move"
         );
-        source.stop.store(true, Ordering::Release);
+        source.shutdown();
+        target.shutdown();
         server.join().unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -822,7 +823,7 @@ mod tests {
             )
             .unwrap();
         let server = source_node.serve(listener, |_| false).unwrap();
-        target_node.sync_once(&peer).unwrap();
+        crate::test_network::sync(&source_node, &target_node);
         let object = create(
             files
                 .iter()
@@ -887,7 +888,7 @@ mod tests {
                                     .collect(),
                             )
                             .unwrap();
-                        target_node.sync_once(&peer).unwrap();
+                        crate::test_network::sync(&source_node, &target_node);
                         target_node
                             .engine
                             .lock()
@@ -906,7 +907,8 @@ mod tests {
                 windows::Win32::System::Ole::ReleaseStgMedium(&mut medium);
             }
         }
-        source_node.stop.store(true, Ordering::Release);
+        source_node.shutdown();
+        target_node.shutdown();
         server.join().unwrap();
     }
     #[test]

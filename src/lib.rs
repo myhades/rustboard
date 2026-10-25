@@ -8,3 +8,7 @@ extern crate self as rustboard;
 #[cfg(test)]
 #[path = "../tests/support/pattern.rs"]
 mod test_pattern;
+
+#[cfg(test)]
+#[path = "../tests/support/network.rs"]
+mod test_network;

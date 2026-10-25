@@ -64,7 +64,7 @@ fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
         )
         .unwrap();
     let server = a.serve(listener, |_| false).unwrap();
-    b.sync_once(&peer).unwrap();
+    crate::test_network::sync(&a, &b);
     assert!(
         a.local_ipc(IpcOperation::GetFileOffers).unwrap()["offers"]
             .as_array()
@@ -91,7 +91,7 @@ fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
             Default::default(),
         )
         .unwrap();
-    b.sync_once(&remote.peer).unwrap();
+    crate::test_network::sync(&a, &b);
     b.engine
         .lock()
         .unwrap()
@@ -143,7 +143,8 @@ fn negotiated_binary_window_is_lazy_bounded_and_revocable() {
         .unwrap()["offer"]
             .is_null()
     );
-    a.stop.store(true, Ordering::Release);
+    a.shutdown();
+    b.shutdown();
     server.join().unwrap();
 }
 #[test]
@@ -184,7 +185,7 @@ fn mutual_tls_offer_lazy_read_and_untrusted_rejection() {
         )
         .unwrap();
     let server = a.serve(listener, |_| false).unwrap();
-    b.sync_once(&peer).unwrap();
+    crate::test_network::sync(&a, &b);
     assert_eq!(source.bytes_read.load(Ordering::Relaxed), 0);
     let ipc_read = || IpcOperation::ReadBinary {
         background: false,
@@ -219,13 +220,20 @@ fn mutual_tls_offer_lazy_read_and_untrusted_rejection() {
     assert!(b.ipc_connections.lock().unwrap().is_empty());
     let stranger = Identity::generate().unwrap();
     let outcome = connect(&stranger, &peer).and_then(|mut unknown| {
-        write_frame(&mut unknown, &Message::Poll)?;
+        write_frame(
+            &mut unknown,
+            &Message::Hello {
+                protocol: PROTOCOL_VERSION,
+                device_id: stranger.device(),
+            },
+        )?;
         read_frame::<_, Message>(&mut unknown)
     });
     assert!(outcome.is_err());
     a.peers.lock().unwrap().clear();
     assert!(remote.read_at(0, &mut bytes).is_err());
-    a.stop.store(true, Ordering::Release);
+    a.shutdown();
+    b.shutdown();
     server.join().unwrap();
 }
 
@@ -278,7 +286,7 @@ fn source_failure_mid_window_does_not_return_partial_data() {
         )
         .unwrap();
     let server = a.serve(listener, |_| false).unwrap();
-    b.sync_once(&peer).unwrap();
+    crate::test_network::sync(&a, &b);
     let remote = RemoteSource::new(b.clone(), peer, offer.offer_id.clone(), file);
     remote.read_at(0, &mut [0; MAX_CHUNK]).unwrap();
 
@@ -287,7 +295,8 @@ fn source_failure_mid_window_does_not_return_partial_data() {
     assert!(bytes.iter().all(|byte| *byte == 99));
     assert!(remote.connection.lock().unwrap().bytes.is_empty());
     drop(remote);
-    a.stop.store(true, Ordering::Release);
+    a.shutdown();
+    b.shutdown();
     server.join().unwrap();
 }
 
@@ -336,7 +345,7 @@ fn failed_platform_recycle_keeps_the_offer_and_is_not_retried() {
             false
         })
         .unwrap();
-    target.sync_once(&peer).unwrap();
+    crate::test_network::sync(&source, &target);
     assert!(target.recycle_remote(&offer.offer_id).is_err());
     assert_eq!(RECYCLES.load(Ordering::SeqCst), 0);
     let remote = RemoteSource::new(target.clone(), peer, offer.offer_id.clone(), file);
@@ -356,36 +365,7 @@ fn failed_platform_recycle_keeps_the_offer_and_is_not_retried() {
         offer.offer_id
     );
     drop(remote);
-    source.stop.store(true, Ordering::Release);
+    source.shutdown();
+    target.shutdown();
     server.join().unwrap();
-}
-
-#[test]
-fn peer_connection_tracks_sync_success_and_failure() {
-    let a = Node::new(Identity::generate().unwrap(), vec![]);
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let peer = Peer {
-        address: listener.local_addr().unwrap(),
-        fingerprint: a.identity.pin(),
-    };
-    let b = Node::new(Identity::generate().unwrap(), vec![peer.clone()]);
-    assert_eq!(b.peer_connection(peer.address), None);
-    a.peers.lock().unwrap().push(Peer {
-        address: "127.0.0.1:1".parse().unwrap(),
-        fingerprint: b.identity.pin(),
-    });
-    let server = a.serve(listener, |_| false).unwrap();
-    b.start_sync();
-    let wait = |expected| {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while b.peer_connection(peer.address) != Some(expected) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert_eq!(b.peer_connection(peer.address), Some(expected));
-    };
-    wait(true);
-    a.stop.store(true, Ordering::Release);
-    server.join().unwrap();
-    wait(false);
-    b.stop.store(true, Ordering::Release);
 }

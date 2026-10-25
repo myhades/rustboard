@@ -185,7 +185,7 @@ impl Server {
                 ensure!(args.len() == 2, "address required");
                 crate::app::config::unpair_ip(&self.dir, args[1].parse()?)?;
             }
-            "stop" => node.stop.store(true, Ordering::Release),
+            "stop" => node.shutdown(),
             _ => anyhow::bail!("unknown command"),
         }
         Ok(serde_json::json!({"ok":true}))

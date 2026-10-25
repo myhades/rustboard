@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn background_tls_read_allows_rename_and_rejects_changed_source() {
         use crate::core::transport::{Identity, Node, Peer};
-        use std::{net::TcpListener, sync::atomic::Ordering};
+        use std::net::TcpListener;
         let dir = std::env::temp_dir().join(new_id());
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("source.bin");
@@ -221,7 +221,7 @@ mod tests {
         };
         let file = files[0].clone();
         let server = a.serve(listener, |_| false).unwrap();
-        b.sync_once(&peer).unwrap();
+        crate::test_network::sync(&a, &b);
         let read = |offset| {
             b.local_ipc(crate::core::IpcOperation::ReadBinary {
                 background: true,
@@ -236,9 +236,9 @@ mod tests {
         assert!(read(0).is_ok());
         std::fs::rename(&path, &moved).unwrap();
         assert!(read(4).is_err());
-        drop(b);
+        b.shutdown();
         std::fs::rename(&moved, &path).unwrap();
-        a.stop.store(true, Ordering::Release);
+        a.shutdown();
         server.join().unwrap();
         drop(a);
         std::fs::remove_file(path).unwrap();
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn tls_first_read_locks_source_and_eof_releases_it() {
         use crate::core::transport::{Identity, Node, Peer, RemoteSource};
-        use std::{net::TcpListener, sync::atomic::Ordering};
+        use std::net::TcpListener;
         let dir = std::env::temp_dir().join(new_id());
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("source.bin");
@@ -272,10 +272,10 @@ mod tests {
         };
         let file = files[0].clone();
         let server = a.serve(listener, |_| false).unwrap();
-        b.sync_once(&peer).unwrap();
+        crate::test_network::sync(&a, &b);
         std::fs::rename(&path, &moved).unwrap();
         std::fs::rename(&moved, &path).unwrap();
-        let source = RemoteSource::new(b, peer, manifest.offer_id.clone(), file);
+        let source = RemoteSource::new(b.clone(), peer, manifest.offer_id.clone(), file);
         let mut bytes = [0; 4];
         source.read_at(0, &mut bytes).unwrap();
         assert_eq!(&bytes, b"abcd");
@@ -284,10 +284,19 @@ mod tests {
         assert!(std::fs::remove_file(&path).is_err());
         source.read_at(4, &mut bytes).unwrap();
         assert_eq!(&bytes, b"efgh");
-        std::fs::rename(&path, &moved).unwrap();
+        // The final bytes can arrive before the sender returns from its write.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while let Err(error) = std::fs::rename(&path, &moved) {
+            assert!(
+                error.raw_os_error() == Some(32) && std::time::Instant::now() < deadline,
+                "{error}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         std::fs::rename(&moved, &path).unwrap();
         drop(source);
-        a.stop.store(true, Ordering::Release);
+        a.shutdown();
+        b.shutdown();
         server.join().unwrap();
         drop(a);
         std::fs::remove_file(path).unwrap();

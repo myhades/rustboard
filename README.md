@@ -82,15 +82,15 @@ Compare the fingerprints and confirm on both sides. Peers connect directly, so p
 
 The default TCP ports are `45452` for sync and `45453` for pairing.
 
-### Native clipboard
+### Use the clipboard sync
 
-Copy as you normally do. Copied content automatically becomes available for pasting on your paired devices.
+Copy as you normally do. Copied content automatically becomes available for pasting on your paired peers.
 
 | Content | Formats | Limit per copy |
 | --- | --- | --- |
 | Text | Plain text, HTML and RTF. Formats are preserved where the receiving app supports them. | 4 MiB |
 | Images | PNG and JPEG. Bitmap formats are converted when needed. | 64 MiB |
-| Files and folders | As is. Ownership, ACLs and extended attributes may be lost. | 8 MiB of metadata for up to 10,000 entries |
+| Files and folders | As is. Ownership, ACLs and extended attributes will be lost. | 8 MiB of metadata for up to 10,000 entries |
 
 > [!WARNING]
 > Application-specific clipboard formats, symlinks, Windows junctions or special filesystem entries are not supported.
@@ -98,11 +98,11 @@ Copy as you normally do. Copied content automatically becomes available for past
 **Cutting / moving files** 
 
 - **Windows / Linux:** <kbd>Ctrl</kbd> + <kbd>X</kbd> (Cut) at the source, then paste at the destination.
-- **macOS Finder:** either copy at the source, then <kbd>⌘</kbd> + <kbd>⌥</kbd> + <kbd>V</kbd> (Move Item here) at the destination; or cut at the source, then paste at the destination.
+- **macOS:** either copy at the source, then <kbd>⌘</kbd> + <kbd>⌥</kbd> + <kbd>V</kbd> (Move Item here) at the destination; or cut at the source, then paste at the destination.
 
 The cutting / moving operation consists of a regular copy and a subsequent step of recycling the original files. Recycling only happens when the paste is completed and recycling is available. This step is skipped otherwise. **Files are never directly deleted.**
 
-*Note that on macOS, completion means File Provider has downloaded every file while Finder may still be writing to the destination.
+**Note that on macOS, completion means File Provider has downloaded every file while Finder may still be writing to the destination.*
 
 ### Configuration
 
@@ -130,12 +130,12 @@ The first start automatically creates `config.json` and a device identity. Delet
 
 <a id="macos-options"></a>
 
-A set of macOS-specific options to enhance the Universal Clipboard experience. For details, check [Universal Clipboard](#universal-clipboard).
+A set of macOS-specific options to enhance the Universal Clipboard experience. For how this works, check [Universal Clipboard](#universal-clipboard).
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `eager_download` | `false` | Automatically download files less than **50 MB** on receipt for Handoff file fetching. This will consume bandwidth and cache space even if nothing is pasted. <br> **If disabled, file copying to Universal Clipboard clients will NOT function correctly.** |
-| `wake_on_receive` | `false` | Declare user activity on receipt to resume Handoff advertising when idle. This will briefly turn on the display if it was off. <br> **If disabled, Universal Clipboard will NOT update content when the system is considered idle (usually 2 minutes after the last user input).** |
+| `eager_download` | `false` | Automatically download files less than **50 MB** on receipt for Handoff file fetching<sup> [2]</sup>. This will consume bandwidth and cache space even if nothing is pasted. <br> **If disabled, file copying to Universal Clipboard clients will NOT function correctly.** |
+| `wake_on_receive` | `false` | Declare user activity on receipt to resume Handoff advertising when idle. This will briefly turn on the display if it was off. <br> **If disabled, Universal Clipboard will NOT update its content when the system is considered idle (usually 2 minutes after the last user input).** |
 
 
 ```json
@@ -145,7 +145,7 @@ A set of macOS-specific options to enhance the Universal Clipboard experience. F
   }
 ```
 
-The 50 MB limit applies to the whole batch. Cut items are not downloaded in advance.
+[2] The 50 MB limit applies to the whole batch. Cut items are not downloaded in advance.
 
 #### Peers
 

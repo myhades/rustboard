@@ -1,9 +1,9 @@
 cask "rustboard" do
-  version "0.1.0"
+  version "0.2.0"
   on_macos do
-    sha256 arm: "15bf4b4aa6d6968bcb5394ab6d8a8f8c4b1ad72e72e72369bf10a4c90dc51d02", intel: "2accc8e99f1506e4355525b17d682b798640d3c10255e7822f9d684fd35baa8b"
+    sha256 arm: "0c033b46a7a549a101f1ae96e638d64c97691cf0442f0b246d26eb72d769c517", intel: "8a496d593e7e2aeb774ff35080b3cd99024a79ba5335b25e0a69720e13ffb182"
     arch arm: "arm64", intel: "x86_64"
-    url "https://github.com/myhades/rustboard/releases/download/v0.1.0/rustboard-#{version}-macos-#{arch}.tar.gz"
+    url "https://github.com/myhades/rustboard/releases/download/v0.2.0/rustboard-#{version}-macos-#{arch}.tar.gz"
     name "Rustboard"
     desc "Native clipboard sync with lazy file transfer"
     homepage "https://github.com/myhades/rustboard"
@@ -31,8 +31,8 @@ cask "rustboard" do
     }
   end
   on_linux do
-    sha256 "93ce3ea406409fcd4b5998a619658c16320f2c26d8de9a833259b15bbc6cc957"
-    url "https://github.com/myhades/rustboard/releases/download/v0.1.0/rustboard-0.1.0-linux-x86_64.tar.gz"
+    sha256 "1c82f5c504c1d040b1e0bfc7a7add0583b48dd03caf9ce823c6b47bf1569fca5"
+    url "https://github.com/myhades/rustboard/releases/download/v0.2.0/rustboard-0.2.0-linux-x86_64.tar.gz"
     name "Rustboard"
     desc "Native clipboard sync with lazy file transfer"
     homepage "https://github.com/myhades/rustboard"
